@@ -16,12 +16,12 @@ blank import:
 
 ```go
 import (
-	_ "github.com/bedrock-mc/vanilla-gen/bloco"
+	_ "github.com/bedrock-mc/vanilla-gen/block"
 	vanilla "github.com/bedrock-mc/vanilla-gen"
 )
 ```
 
-The blank import runs during init and registers the missing block states
-silently.
+The blank import runs during init and silently registers Dragonfly block states
+that upstream still exposes as unknown blocks.
 
 The module is pinned to the current Dragonfly upstream `master` pseudo-version in `go.mod`.
