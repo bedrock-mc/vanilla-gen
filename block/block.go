@@ -17,37 +17,73 @@ func init() {
 // Register registers all missing block states. States already implemented by
 // upstream Dragonfly are left alone.
 func Register() {
-	for _, b := range world.Blocks() {
+	registerAll([]world.Block{
+		BuddingAmethyst{},
+		RootedDirt{},
+		EndGateway{},
+		EndPortal{},
+		EndStone{},
+		HangingRoots{},
+		MossBlock{},
+		Nylium{},
+		Nylium{Warped: true},
+		PaleMossBlock{},
+		MangroveRoots{},
+		Spawner{},
+		ChorusPlant{},
+		Fungus{},
+		Fungus{Warped: true},
+		Roots{},
+		Roots{Warped: true},
+		Portal{Axis: dfcube.X},
+		Portal{Axis: dfcube.Z},
+	})
+	registerAll(allAmethystCluster())
+	registerAll(allAzalea())
+	registerAll(allBamboo())
+	registerAll(allBrownMushroomBlock())
+	registerAll(allChorusFlowers())
+	registerAll(allCreakingHeart())
+	registerAll(allEndPortalFrames())
+	registerAll(allLargeAmethystBud())
+	registerAll(allLeafLitter())
+	registerAll(allMangrovePropagule())
+	registerAll(allMediumAmethystBud())
+	registerAll(allMushroomStem())
+	registerAll(allNetherVines())
+	registerAll(allPaleHangingMoss())
+	registerAll(allPaleMossCarpet())
+	registerAll(allRedMushroomBlock())
+	registerAll(allSmallAmethystBud())
+	registerAll(allSmallDripleaf())
+	registerAll(allBigDripleaf())
+}
+
+func registerAll(blocks []world.Block) {
+	for _, b := range blocks {
 		name, properties := b.EncodeBlock()
-		if _, hash := b.Hash(); hash != math.MaxUint64 {
+		existing, ok := world.BlockByName(name, properties)
+		if !ok {
 			continue
 		}
-		world.RegisterBlock(StateBlock{Name: name, Properties: properties})
+		if _, hash := existing.Hash(); hash != math.MaxUint64 {
+			continue
+		}
+		world.RegisterBlock(b)
 	}
-}
-
-// StateBlock is the registered implementation used for missing block states.
-type StateBlock struct {
-	base
-	Name       string
-	Properties map[string]any
-}
-
-func (b StateBlock) EncodeBlock() (string, map[string]any) {
-	return b.Name, b.Properties
 }
 
 type base struct{}
 
 func (base) Hash() (uint64, uint64) { return 0, math.MaxUint64 }
 
-func (base) Model() world.BlockModel { return model{} }
+func (base) Model() world.BlockModel { return emptyModel{} }
 
-type model struct{}
+type emptyModel struct{}
 
-func (model) BBox(dfcube.Pos, world.BlockSource) []dfcube.BBox { return nil }
+func (emptyModel) BBox(dfcube.Pos, world.BlockSource) []dfcube.BBox { return nil }
 
-func (model) FaceSolid(dfcube.Pos, dfcube.Face, world.BlockSource) bool { return false }
+func (emptyModel) FaceSolid(dfcube.Pos, dfcube.Face, world.BlockSource) bool { return false }
 
 func boolString(v bool) string {
 	if v {

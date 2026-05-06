@@ -16,7 +16,7 @@ func TestImportRegistersMissingBlockStates(t *testing.T) {
 	if !ok {
 		t.Fatal("expected minecraft:bamboo to exist in Dragonfly block states")
 	}
-	if _, ok := b.(block.StateBlock); !ok {
+	if _, ok := b.(block.Bamboo); !ok {
 		t.Fatalf("expected minecraft:bamboo to be registered by vanilla-gen/block, got %T", b)
 	}
 }
