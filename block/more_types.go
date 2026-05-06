@@ -9,6 +9,10 @@ func DripleafTiltUnstable() DripleafTilt { return DripleafTilt{"unstable"} }
 func DripleafTiltPartial() DripleafTilt  { return DripleafTilt{"partial_tilt"} }
 func DripleafTiltFull() DripleafTilt     { return DripleafTilt{"full_tilt"} }
 
+func DripleafTilts() []DripleafTilt {
+	return []DripleafTilt{DripleafTiltNone(), DripleafTiltUnstable(), DripleafTiltPartial(), DripleafTiltFull()}
+}
+
 type BigDripleaf struct {
 	base
 	Head   bool
@@ -111,6 +115,10 @@ type EndPortal struct{ base }
 
 func (EndPortal) EncodeBlock() (string, map[string]any) { return "minecraft:end_portal", nil }
 
+type EndGateway struct{ base }
+
+func (EndGateway) EncodeBlock() (string, map[string]any) { return "minecraft:end_gateway", nil }
+
 type EndPortalFrame struct {
 	base
 	Facing cube.Direction
@@ -122,6 +130,15 @@ func (e EndPortalFrame) EncodeBlock() (string, map[string]any) {
 		"minecraft:cardinal_direction": e.Facing.String(),
 		"end_portal_eye_bit":           e.Eye,
 	}
+}
+
+type Portal struct {
+	base
+	Axis cube.Axis
+}
+
+func (p Portal) EncodeBlock() (string, map[string]any) {
+	return "minecraft:portal", map[string]any{"portal_axis": p.Axis.String()}
 }
 
 type Spawner struct{ base }

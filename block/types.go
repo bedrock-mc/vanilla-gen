@@ -8,10 +8,18 @@ func BambooNoLeaves() BambooLeafSize    { return BambooLeafSize{"no_leaves"} }
 func BambooSmallLeaves() BambooLeafSize { return BambooLeafSize{"small_leaves"} }
 func BambooLargeLeaves() BambooLeafSize { return BambooLeafSize{"large_leaves"} }
 
+func BambooLeafSizes() []BambooLeafSize {
+	return []BambooLeafSize{BambooNoLeaves(), BambooSmallLeaves(), BambooLargeLeaves()}
+}
+
 type BambooStalkThickness struct{ name string }
 
 func ThinBamboo() BambooStalkThickness  { return BambooStalkThickness{"thin"} }
 func ThickBamboo() BambooStalkThickness { return BambooStalkThickness{"thick"} }
+
+func BambooStalkThicknesses() []BambooStalkThickness {
+	return []BambooStalkThickness{ThinBamboo(), ThickBamboo()}
+}
 
 type Bamboo struct {
 	base
@@ -71,6 +79,10 @@ func PaleMossCarpetNone() PaleMossCarpetSide  { return PaleMossCarpetSide{"none"
 func PaleMossCarpetShort() PaleMossCarpetSide { return PaleMossCarpetSide{"short"} }
 func PaleMossCarpetTall() PaleMossCarpetSide  { return PaleMossCarpetSide{"tall"} }
 
+func PaleMossCarpetSides() []PaleMossCarpetSide {
+	return []PaleMossCarpetSide{PaleMossCarpetNone(), PaleMossCarpetShort(), PaleMossCarpetTall()}
+}
+
 type PaleMossCarpet struct {
 	base
 	Upper bool
@@ -115,6 +127,10 @@ type CreakingHeartState struct{ name string }
 func UprootedCreakingHeart() CreakingHeartState { return CreakingHeartState{"uprooted"} }
 func DormantCreakingHeart() CreakingHeartState  { return CreakingHeartState{"dormant"} }
 func AwakeCreakingHeart() CreakingHeartState    { return CreakingHeartState{"awake"} }
+
+func CreakingHeartStates() []CreakingHeartState {
+	return []CreakingHeartState{UprootedCreakingHeart(), DormantCreakingHeart(), AwakeCreakingHeart()}
+}
 
 type CreakingHeart struct {
 	base
