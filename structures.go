@@ -938,7 +938,7 @@ func (g Generator) lookupTemplateBlock(name string, properties map[string]any) (
 		blockProps = nil
 	}
 
-	rid, ok := chunk.StateToRuntimeID(name, blockProps)
+	rid, ok := g.blockRegistry.StateToRuntimeID(name, blockProps)
 	if !ok {
 		return 0, false
 	}

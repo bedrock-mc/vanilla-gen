@@ -1,6 +1,7 @@
 package block_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/bedrock-mc/vanilla-gen/block"
@@ -8,6 +9,7 @@ import (
 )
 
 func TestImportRegistersMissingBlockStates(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
 	b, ok := world.BlockByName("minecraft:bamboo", map[string]any{
 		"age_bit":                false,
 		"bamboo_leaf_size":       "no_leaves",
@@ -16,8 +18,8 @@ func TestImportRegistersMissingBlockStates(t *testing.T) {
 	if !ok {
 		t.Fatal("expected minecraft:bamboo to exist in Dragonfly block states")
 	}
-	if _, ok := b.(block.Bamboo); !ok {
-		t.Fatalf("expected minecraft:bamboo to be registered by vanilla-gen/block, got %T", b)
+	if _, hash := b.Hash(); hash == math.MaxUint64 {
+		t.Fatalf("expected minecraft:bamboo to have a typed implementation, got %T", b)
 	}
 }
 

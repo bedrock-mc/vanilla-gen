@@ -87,7 +87,7 @@ func (r *treeDecorationRegion) ensureSlot(chunkX, chunkZ int) (treeDecorationReg
 	if slot, ok := r.slot(chunkX, chunkZ); ok {
 		return slot, true
 	}
-	neighbor := chunk.New(r.g.airRID, cube.Range{r.minY, r.maxY})
+	neighbor := chunk.New(r.g.blockRegistry, cube.Range{r.minY, r.maxY})
 	neighborBiomes, _, _, _, _ := r.g.prepareChunkForDecoration(world.ChunkPos{int32(chunkX), int32(chunkZ)}, neighbor)
 	slot := treeDecorationRegionSlot{chunk: neighbor, biomes: neighborBiomes}
 	r.set(chunkX, chunkZ, neighbor, neighborBiomes)

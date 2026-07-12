@@ -3,15 +3,15 @@ module github.com/bedrock-mc/vanilla-gen
 go 1.26.0
 
 require (
-	github.com/df-mc/dragonfly v0.10.13-0.20260505191230-b9a408ac6b28
-	github.com/sandertv/gophertunnel v1.55.2
+	github.com/df-mc/dragonfly v0.10.15-0.20260712232412-68863641c33a
+	github.com/go-gl/mathgl v1.2.0
+	github.com/sandertv/gophertunnel v1.57.0
 )
 
 require (
-	github.com/brentp/intintmap v0.0.0-20190211203843-30dc0ade9af9 // indirect
+	github.com/brentp/intintmap v0.0.0-20251106190759-56907b1f8479 // indirect
 	github.com/df-mc/goleveldb v1.1.9 // indirect
-	github.com/df-mc/worldupgrader v1.0.20 // indirect
-	github.com/go-gl/mathgl v1.2.0 // indirect
+	github.com/df-mc/worldupgrader v1.0.21 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect

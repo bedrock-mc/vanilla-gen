@@ -24,6 +24,7 @@ var (
 )
 
 type Generator struct {
+	blockRegistry      world.BlockRegistry
 	dimension          world.Dimension
 	dimensionName      string
 	seed               int64
@@ -66,6 +67,7 @@ func New(seed int64) Generator {
 }
 
 func NewForDimension(seed int64, dim world.Dimension) Generator {
+	world.DefaultBlockRegistry.Finalize()
 	noises := gen.NewNoiseRegistry(seed)
 	worldgen, structureTemplates, structureResolver := sharedStructureResources()
 	dimensionName, graph, roots, surfaceRuntime, forceBottomBedrock, scalar, vector := dimensionRuntime(seed, dim, noises, worldgen)
@@ -90,6 +92,7 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 	defaultBlockRID := runtimeIDForDimensionState(metadata.DefaultBlock)
 	defaultFluidRID := runtimeIDForDimensionState(metadata.DefaultFluid)
 	return Generator{
+		blockRegistry:      world.DefaultBlockRegistry,
 		dimension:          dim,
 		dimensionName:      dimensionName,
 		seed:               seed,

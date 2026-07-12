@@ -3,7 +3,9 @@
 package block
 
 import (
+	"fmt"
 	"math"
+	"strings"
 
 	_ "github.com/df-mc/dragonfly/server/block"
 	dfcube "github.com/df-mc/dragonfly/server/block/cube"
@@ -61,16 +63,22 @@ func Register() {
 
 func registerAll(blocks []world.Block) {
 	for _, b := range blocks {
-		name, properties := b.EncodeBlock()
-		existing, ok := world.BlockByName(name, properties)
-		if !ok {
-			continue
-		}
-		if _, hash := existing.Hash(); hash != math.MaxUint64 {
-			continue
-		}
-		world.RegisterBlock(b)
+		register(b)
 	}
+}
+
+func register(b world.Block) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message := fmt.Sprint(recovered)
+			if strings.HasPrefix(message, "block state returned is not registered ") ||
+				(strings.HasPrefix(message, "block with name and properties ") && strings.HasSuffix(message, " already registered")) {
+				return
+			}
+			panic(recovered)
+		}
+	}()
+	world.RegisterBlock(b)
 }
 
 type base struct{}

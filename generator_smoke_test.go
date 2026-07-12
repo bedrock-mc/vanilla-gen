@@ -13,7 +13,7 @@ import (
 func TestGenerateChunkWithUpstreamDragonfly(t *testing.T) {
 	g := vanilla.New(1)
 	air := runtimeID(t, block.Air{})
-	c := chunk.New(air, cube.Range{-64, 319})
+	c := chunk.New(world.DefaultBlockRegistry, cube.Range{-64, 319})
 
 	g.GenerateChunk(world.ChunkPos{0, 0}, c)
 
