@@ -1,0 +1,5 @@
+# Server runtime data from cmd/testserver
+world/
+players/
+config.toml
+resources/
