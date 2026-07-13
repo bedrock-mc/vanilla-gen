@@ -155,6 +155,40 @@ func resolveBiomeKey(b gen.Biome) string {
 		return "windswept_gravelly_hills"
 	case gen.BiomeSnowyMountains:
 		return "snowy_mountains"
+	// Dragonfly reports Bedrock legacy names for these; the worldgen data is
+	// keyed by the Java identifiers.
+	case gen.BiomeSnowyBeach:
+		return "snowy_beach"
+	case gen.BiomeSnowyTaiga:
+		return "snowy_taiga"
+	case gen.BiomeWindsweptHills:
+		return "windswept_hills"
+	case gen.BiomeWindsweptForest:
+		return "windswept_forest"
+	case gen.BiomeSnowyPlains:
+		return "snowy_plains"
+	case gen.BiomeIceSpikes:
+		return "ice_spikes"
+	case gen.BiomeOldGrowthPineTaiga:
+		return "old_growth_pine_taiga"
+	case gen.BiomeBadlands:
+		return "badlands"
+	case gen.BiomeErodedBadlands:
+		return "eroded_badlands"
+	case gen.BiomeWoodedBadlands:
+		return "wooded_badlands"
+	case gen.BiomeMushroomFields:
+		return "mushroom_fields"
+	case gen.BiomeOldGrowthSpruceTaiga:
+		return "old_growth_spruce_taiga"
+	case gen.BiomeDarkForest:
+		return "dark_forest"
+	case gen.BiomeWindsweptSavanna:
+		return "windswept_savanna"
+	case gen.BiomeStonyShore:
+		return "stony_shore"
+	case gen.BiomeSwamp:
+		return "swamp"
 	}
 	rid, ok := biomeRuntimeIDs[b]
 	if !ok {

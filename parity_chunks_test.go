@@ -143,14 +143,6 @@ func TestChunkParityBaseTerrain(t *testing.T) {
 				for qz := 0; qz < 4; qz++ {
 					for qy := r.Min() >> 2; qy <= r.Max()>>2; qy++ {
 						want := strings.TrimPrefix(jc.Biome(qx, qy, qz), "minecraft:")
-						switch want {
-						case "snowy_taiga":
-							want = "cold_taiga"
-						case "snowy_plains":
-							want = "ice_plains"
-						case "stony_shore":
-							want = "stone_beach"
-						}
 						got := biomeKey(h.g.biomeAt(c, qx*4, qy*4, qz*4))
 						biomeTotal++
 						if got != want {

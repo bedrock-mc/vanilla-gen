@@ -306,3 +306,33 @@ var netherPresetPoints = []climateParameterPoint{
 		biome:  BiomeBasaltDeltas,
 	},
 }
+
+// PossibleBiomes mirrors BiomeSource.possibleBiomes: the distinct biomes in
+// parameter-list order (first appearance), which feeds FeatureSorter and
+// therefore the feature seed indices.
+func PossibleBiomes(dimension string) []Biome {
+	switch normalizeIdentifier(dimension) {
+	case "overworld":
+		return distinctPointBiomes(overworldBiomePoints)
+	case "nether":
+		return distinctPointBiomes(netherPresetPoints)
+	case "end":
+		// TheEndBiomeSource constructor order.
+		return []Biome{BiomeTheEnd, BiomeEndHighlands, BiomeEndMidlands, BiomeSmallEndIslands, BiomeEndBarrens}
+	default:
+		return nil
+	}
+}
+
+func distinctPointBiomes(points []climateParameterPoint) []Biome {
+	seen := make(map[Biome]struct{}, 64)
+	out := make([]Biome, 0, 64)
+	for _, p := range points {
+		if _, ok := seen[p.biome]; ok {
+			continue
+		}
+		seen[p.biome] = struct{}{}
+		out = append(out, p.biome)
+	}
+	return out
+}

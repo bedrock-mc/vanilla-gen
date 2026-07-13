@@ -87,7 +87,7 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 	structureStepOrder := buildStructureStepOrder(structurePlanners)
 	carvers := gen.NewCarverRegistry()
 	features := gen.NewFeatureRegistry()
-	biomeGeneration := newBiomeGenerationIndex(features, carvers)
+	biomeGeneration := newBiomeGenerationIndex(features, carvers, gen.PossibleBiomes(dimensionName))
 	// Prewarm static structure pool/template data so chunk generation doesn't pay first-use decode costs.
 	structureResolver.prewarmJigsawCandidates(structurePlanners)
 	defaultBlockRID := runtimeIDForDimensionState(metadata.DefaultBlock)
@@ -457,8 +457,10 @@ type biomeGenerationIndex struct {
 	carverNames       [256][]string
 }
 
-func newBiomeGenerationIndex(features *gen.FeatureRegistry, carvers *gen.CarverRegistry) *biomeGenerationIndex {
+func newBiomeGenerationIndex(features *gen.FeatureRegistry, carvers *gen.CarverRegistry, possibleBiomes []gen.Biome) *biomeGenerationIndex {
 	idx := &biomeGenerationIndex{}
+	// Carvers stay populated for every biome; the feature order below only
+	// considers the generator's possible biomes like vanilla FeatureSorter.
 	for _, biome := range sortedBiomesByKey {
 		biomeID := int(biome)
 		key := biomeKey(biome)
@@ -470,7 +472,7 @@ func newBiomeGenerationIndex(features *gen.FeatureRegistry, carvers *gen.CarverR
 		}
 		idx.carverNames[biomeID] = carvers.BiomeCarvers(key)
 	}
-	idx.stepFeatures = buildStepFeatureData(idx.featureSteps)
+	idx.stepFeatures = buildStepFeatureData(idx.featureSteps, possibleBiomes)
 	for _, biome := range sortedBiomesByKey {
 		biomeID := int(biome)
 		membership := make(map[string]struct{})

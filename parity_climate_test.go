@@ -83,15 +83,6 @@ func TestClimateParitySeed1(t *testing.T) {
 		}
 
 		wantBiome := strings.TrimPrefix(s.Biome, "minecraft:")
-		// The runtime uses Bedrock biome keys for a few Java ids.
-		switch wantBiome {
-		case "snowy_taiga":
-			wantBiome = "cold_taiga"
-		case "snowy_plains":
-			wantBiome = "ice_plains"
-		case "stony_shore":
-			wantBiome = "stone_beach"
-		}
 		gotBiome := biomeKey(source.GetBiome(bx, by, bz))
 		if gotBiome != wantBiome {
 			biomeBad++

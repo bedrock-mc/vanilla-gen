@@ -23,14 +23,17 @@ func (d stepFeatureData) index(name string) (int, bool) {
 	return index, ok
 }
 
-func buildStepFeatureData(featureSteps [256][featureStepCount][]string) [featureStepCount]stepFeatureData {
+// buildStepFeatureData mirrors FeatureSorter.buildFeaturesPerStep over the
+// generator's possible biomes in vanilla order; the resulting indices feed
+// setFeatureSeed.
+func buildStepFeatureData(featureSteps [256][featureStepCount][]string, possibleBiomes []gen.Biome) [featureStepCount]stepFeatureData {
 	featureIndexByName := make(map[string]int)
 	nextFeatureIndex := 0
 	edges := make(map[featureNode]map[featureNode]struct{})
 	nodes := make([]featureNode, 0, 512)
 	seenNodes := make(map[featureNode]struct{})
 
-	for _, biome := range sortedBiomesByKey {
+	for _, biome := range possibleBiomes {
 		var sourceFeatures []featureNode
 		for step := 0; step < featureStepCount; step++ {
 			for _, name := range featureSteps[biome][step] {
