@@ -3,7 +3,7 @@ package gen
 
 import "math"
 
-func ComputeFinalDensity(ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext) float64 {
+func ComputeFinalDensity(ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext) float64 {
 	v0 := 0.1171875
 	v1 := yClampedGradient(ctx.BlockY, -64, -40, 0.0, 1.0)
 	v2 := -0.1171875
@@ -115,7 +115,7 @@ func ComputeFinalDensity(ctx FunctionContext, noises NoiseSource, flat *FlatCach
 	return minFloat(squeeze((0.64 * (v0 + (v1 * (v2 + (v3 + (v4 * (v5 + v46)))))))), v56)
 }
 
-func computePreliminarySurfaceLevelInnerDensity(ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext) float64 {
+func computePreliminarySurfaceLevelInnerDensity(ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext) float64 {
 	v0 := 0.1171875
 	v1 := yClampedGradient(ctx.BlockY, -64, -40, 0.0, 1.0)
 	v2 := -0.1171875
@@ -128,7 +128,7 @@ func computePreliminarySurfaceLevelInnerDensity(ctx FunctionContext, noises Nois
 	return (-0.390625 + (v0 + (v1 * (v2 + (v3 + (v4 * (v5 + v8)))))))
 }
 
-func ComputePreliminarySurfaceLevel(ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext) float64 {
+func ComputePreliminarySurfaceLevel(ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext) float64 {
 	v0 := -1.0
 	v1 := clampFloat((128.0 + (-128.0 * ((0.2734375 * (-col.values[6])) + (v0 * col.values[5])))), -40.0, 320.0)
 	upperBound := int(math.Floor(v1))
@@ -138,7 +138,7 @@ func ComputePreliminarySurfaceLevel(ctx FunctionContext, noises NoiseSource, fla
 	})
 }
 
-func ComputeFinalDensity4(ctx FunctionContext4, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext) [4]float64 {
+func ComputeFinalDensity4(ctx FunctionContext4, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext) [4]float64 {
 	return [4]float64{
 		ComputeFinalDensity(FunctionContext{BlockX: ctx.BlockX, BlockY: ctx.BlockY[0], BlockZ: ctx.BlockZ}, noises, flat, col),
 		ComputeFinalDensity(FunctionContext{BlockX: ctx.BlockX, BlockY: ctx.BlockY[1], BlockZ: ctx.BlockZ}, noises, flat, col),

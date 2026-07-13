@@ -99,7 +99,7 @@ type aquiferLocation struct {
 
 type NoiseBasedAquifer struct {
 	graph            *Graph
-	noises           NoiseSource
+	noises           *NoiseRegistry
 	mainFlat         *FlatCacheGrid
 	mainChunkX       int
 	mainChunkZ       int
@@ -126,7 +126,7 @@ func NewNoiseBasedAquifer(
 	graph *Graph,
 	chunkX, chunkZ int,
 	minY, maxY int,
-	noises NoiseSource,
+	noises *NoiseRegistry,
 	flat *FlatCacheGrid,
 	seed int64,
 	fluidPicker FluidPicker,

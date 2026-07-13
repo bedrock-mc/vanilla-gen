@@ -8,7 +8,7 @@ type FinalDensityChunk struct {
 	corners    [5][5][49]float64
 }
 
-func NewFinalDensityChunk(graph *Graph, chunkX, chunkZ, minY, maxY int, noises NoiseSource, flat *FlatCacheGrid) *FinalDensityChunk {
+func NewFinalDensityChunk(graph *Graph, chunkX, chunkZ, minY, maxY int, noises *NoiseRegistry, flat *FlatCacheGrid) *FinalDensityChunk {
 	return NewFinalDensityChunkWithEvaluator(
 		graph,
 		OverworldRootFinalDensity,
@@ -23,14 +23,14 @@ func NewFinalDensityChunk(graph *Graph, chunkX, chunkZ, minY, maxY int, noises N
 	)
 }
 
-type DensityScalarEvaluator func(FunctionContext, NoiseSource, *FlatCacheGrid, *ColumnContext) float64
-type DensityVectorEvaluator func(FunctionContext4, NoiseSource, *FlatCacheGrid, *ColumnContext) [4]float64
+type DensityScalarEvaluator func(FunctionContext, *NoiseRegistry, *FlatCacheGrid, *ColumnContext) float64
+type DensityVectorEvaluator func(FunctionContext4, *NoiseRegistry, *FlatCacheGrid, *ColumnContext) [4]float64
 
-func NewFinalDensityChunkFromRoot(graph *Graph, root, chunkX, chunkZ, minY, maxY int, noises NoiseSource, flat *FlatCacheGrid) *FinalDensityChunk {
+func NewFinalDensityChunkFromRoot(graph *Graph, root, chunkX, chunkZ, minY, maxY int, noises *NoiseRegistry, flat *FlatCacheGrid) *FinalDensityChunk {
 	return NewFinalDensityChunkWithEvaluator(graph, root, chunkX, chunkZ, minY, maxY, noises, flat, nil, nil)
 }
 
-func NewFinalDensityChunkWithEvaluator(graph *Graph, root, chunkX, chunkZ, minY, maxY int, noises NoiseSource, flat *FlatCacheGrid, scalar DensityScalarEvaluator, vector DensityVectorEvaluator) *FinalDensityChunk {
+func NewFinalDensityChunkWithEvaluator(graph *Graph, root, chunkX, chunkZ, minY, maxY int, noises *NoiseRegistry, flat *FlatCacheGrid, scalar DensityScalarEvaluator, vector DensityVectorEvaluator) *FinalDensityChunk {
 	chunk := &FinalDensityChunk{
 		minY:       minY,
 		baseX:      chunkX * 16,
@@ -131,7 +131,7 @@ func densityLerp(t, a, b float64) float64 {
 	return a + t*(b-a)
 }
 
-func evalDensityScalar(graph *Graph, root int, ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext, scalar DensityScalarEvaluator) float64 {
+func evalDensityScalar(graph *Graph, root int, ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext, scalar DensityScalarEvaluator) float64 {
 	if scalar != nil {
 		return scalar(ctx, noises, flat, col)
 	}
@@ -141,11 +141,11 @@ func evalDensityScalar(graph *Graph, root int, ctx FunctionContext, noises Noise
 	return graph.Eval(root, ctx, noises, flat, col, nil)
 }
 
-func EvalDensityScalar(graph *Graph, root int, ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext, scalar DensityScalarEvaluator) float64 {
+func EvalDensityScalar(graph *Graph, root int, ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext, scalar DensityScalarEvaluator) float64 {
 	return evalDensityScalar(graph, root, ctx, noises, flat, col, scalar)
 }
 
-func evalDensityVector(graph *Graph, root int, ctx FunctionContext4, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext, scalar DensityScalarEvaluator, vector DensityVectorEvaluator) [4]float64 {
+func evalDensityVector(graph *Graph, root int, ctx FunctionContext4, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext, scalar DensityScalarEvaluator, vector DensityVectorEvaluator) [4]float64 {
 	if vector != nil {
 		return vector(ctx, noises, flat, col)
 	}

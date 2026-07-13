@@ -176,7 +176,7 @@ func (s *EvalScratch) set(idx int, value float64) {
 	s.seen[idx] = s.mark
 }
 
-func (g *Graph) NewFlatCacheGrid(chunkX, chunkZ int, noises NoiseSource) *FlatCacheGrid {
+func (g *Graph) NewFlatCacheGrid(chunkX, chunkZ int, noises *NoiseRegistry) *FlatCacheGrid {
 	grid := &FlatCacheGrid{
 		firstQuartX: chunkX * 4,
 		firstQuartZ: chunkZ * 4,
@@ -191,8 +191,10 @@ func (g *Graph) NewFlatCacheGrid(chunkX, chunkZ int, noises NoiseSource) *FlatCa
 			blockZ := (grid.firstQuartZ + qz) * 4
 			ctx := FunctionContext{BlockX: blockX, BlockY: 0, BlockZ: blockZ}
 
+			// One scratch per position: values are position-pure, so slots
+			// share subexpression results exactly.
+			scratch.reset()
 			for slot, nodeIdx := range g.FlatCacheOrder {
-				scratch.reset()
 				value := g.evalFlat(g.Nodes[nodeIdx].Dep0, ctx, noises, flatValues, scratch)
 				flatValues[slot] = value
 				grid.values[slot][qz][qx] = value
@@ -211,14 +213,14 @@ func (g *FlatCacheGrid) Lookup(slot, blockX, blockZ int) float64 {
 	return g.values[slot][qz][qx]
 }
 
-func (g *Graph) NewColumnContext(blockX, blockZ int, noises NoiseSource, flat *FlatCacheGrid) *ColumnContext {
+func (g *Graph) NewColumnContext(blockX, blockZ int, noises *NoiseRegistry, flat *FlatCacheGrid) *ColumnContext {
 	values := make([]float64, len(g.Cache2DOrder))
 	computed := make([]bool, len(g.Cache2DOrder))
 	scratch := NewEvalScratch(g)
 	ctx := FunctionContext{BlockX: blockX, BlockY: 0, BlockZ: blockZ}
 
+	scratch.reset()
 	for slot, nodeIdx := range g.Cache2DOrder {
-		scratch.reset()
 		values[slot] = g.evalColumn(g.Nodes[nodeIdx].Dep0, ctx, noises, flat, values, computed, scratch)
 		computed[slot] = true
 	}
@@ -226,7 +228,7 @@ func (g *Graph) NewColumnContext(blockX, blockZ int, noises NoiseSource, flat *F
 	return &ColumnContext{values: values}
 }
 
-func (g *Graph) Eval(root int, ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext, scratch *EvalScratch) float64 {
+func (g *Graph) Eval(root int, ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext, scratch *EvalScratch) float64 {
 	if scratch == nil {
 		pooled := g.scratchPool.Get()
 		if pooled == nil {
@@ -240,7 +242,7 @@ func (g *Graph) Eval(root int, ctx FunctionContext, noises NoiseSource, flat *Fl
 	return g.evalNormal(root, ctx, noises, flat, col, scratch)
 }
 
-func (g *Graph) evalNormal(idx int, ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext, scratch *EvalScratch) float64 {
+func (g *Graph) evalNormal(idx int, ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext, scratch *EvalScratch) float64 {
 	if idx < 0 || idx >= len(g.Nodes) {
 		return 0
 	}
@@ -285,7 +287,7 @@ func (g *Graph) evalNormal(idx int, ctx FunctionContext, noises NoiseSource, fla
 	return value
 }
 
-func (g *Graph) evalFlat(idx int, ctx FunctionContext, noises NoiseSource, flatValues []float64, scratch *EvalScratch) float64 {
+func (g *Graph) evalFlat(idx int, ctx FunctionContext, noises *NoiseRegistry, flatValues []float64, scratch *EvalScratch) float64 {
 	if idx < 0 || idx >= len(g.Nodes) {
 		return 0
 	}
@@ -321,7 +323,7 @@ func (g *Graph) evalFlat(idx int, ctx FunctionContext, noises NoiseSource, flatV
 	return value
 }
 
-func (g *Graph) evalColumn(idx int, ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, values []float64, computed []bool, scratch *EvalScratch) float64 {
+func (g *Graph) evalColumn(idx int, ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, values []float64, computed []bool, scratch *EvalScratch) float64 {
 	if idx < 0 || idx >= len(g.Nodes) {
 		return 0
 	}
@@ -367,7 +369,7 @@ func (g *Graph) evalColumn(idx int, ctx FunctionContext, noises NoiseSource, fla
 	return value
 }
 
-func (g *Graph) evalCommon(node Node, ctx FunctionContext, noises NoiseSource, dep func(int) float64) float64 {
+func (g *Graph) evalCommon(node Node, ctx FunctionContext, noises *NoiseRegistry, dep func(int) float64) float64 {
 	switch node.Op {
 	case OpConstant:
 		return node.Const
@@ -631,4 +633,17 @@ func (g *Graph) pooledScratch() *EvalScratch {
 		return pooled.(*EvalScratch)
 	}
 	return NewEvalScratch(g)
+}
+
+// EvalMulti evaluates several roots at one position sharing a single
+// memoization scratch: shared subexpressions (shift noises, offset splines)
+// are computed once. Values depend only on the position, so cross-root
+// memoization is exact.
+func (g *Graph) EvalMulti(roots []int, out []float64, ctx FunctionContext, noises *NoiseRegistry, flat *FlatCacheGrid, col *ColumnContext) {
+	scratch := g.pooledScratch()
+	scratch.reset()
+	for i, root := range roots {
+		out[i] = g.evalNormal(root, ctx, noises, flat, col, scratch)
+	}
+	g.scratchPool.Put(scratch)
 }

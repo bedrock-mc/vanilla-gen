@@ -94,14 +94,14 @@ func (s *structureTerrainSampler) appendStart(start plannedStructureStart, chunk
 
 func (s *structureTerrainSampler) scalarEvaluator(g Generator, baseScalar gen.DensityScalarEvaluator) gen.DensityScalarEvaluator {
 	root := g.rootIndex("final_density")
-	return func(ctx gen.FunctionContext, noises gen.NoiseSource, flat *gen.FlatCacheGrid, col *gen.ColumnContext) float64 {
+	return func(ctx gen.FunctionContext, noises *gen.NoiseRegistry, flat *gen.FlatCacheGrid, col *gen.ColumnContext) float64 {
 		return gen.EvalDensityScalar(g.graph, root, ctx, noises, flat, col, baseScalar) + s.sample(ctx.BlockX, ctx.BlockY, ctx.BlockZ)
 	}
 }
 
 func (s *structureTerrainSampler) vectorEvaluator(g Generator, baseScalar gen.DensityScalarEvaluator, baseVector gen.DensityVectorEvaluator) gen.DensityVectorEvaluator {
 	root := g.rootIndex("final_density")
-	return func(ctx gen.FunctionContext4, noises gen.NoiseSource, flat *gen.FlatCacheGrid, col *gen.ColumnContext) [4]float64 {
+	return func(ctx gen.FunctionContext4, noises *gen.NoiseRegistry, flat *gen.FlatCacheGrid, col *gen.ColumnContext) [4]float64 {
 		var out [4]float64
 		if baseVector != nil {
 			out = baseVector(ctx, noises, flat, col)
