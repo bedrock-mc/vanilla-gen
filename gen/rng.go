@@ -1,8 +1,9 @@
 package gen
 
 type Xoroshiro128 struct {
-	low  uint64
-	high uint64
+	low      uint64
+	high     uint64
+	gaussian marsagliaGaussian
 }
 
 type PositionalRandomFactory struct {
@@ -102,6 +103,18 @@ func (x *Xoroshiro128) NextInt(bound uint32) uint32 {
 
 func (x *Xoroshiro128) NextDouble() float64 {
 	return float64(x.NextLong()>>11) * 1.1102230246251565e-16
+}
+
+func (x *Xoroshiro128) NextFloat() float32 {
+	return float32(x.NextLong()>>40) * 5.9604645e-8
+}
+
+func (x *Xoroshiro128) NextBool() bool {
+	return x.NextLong()&1 != 0
+}
+
+func (x *Xoroshiro128) NextGaussian() float64 {
+	return x.gaussian.sample(x)
 }
 
 func bitsRotateLeft64(v uint64, k int) uint64 {

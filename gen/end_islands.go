@@ -49,51 +49,6 @@ func endIslandHeightValue(noise SimplexNoise, sectionX, sectionZ int) float64 {
 	return doffs
 }
 
-type LegacyRandom struct {
-	seed uint64
-}
-
-const (
-	legacyMask       uint64 = (1 << 48) - 1
-	legacyMultiplier uint64 = 25214903917
-	legacyIncrement  uint64 = 11
-)
-
-func NewLegacyRandom(seed int64) LegacyRandom {
-	return LegacyRandom{seed: (uint64(seed) ^ legacyMultiplier) & legacyMask}
-}
-
-func (r *LegacyRandom) next(bits int) int {
-	r.seed = (r.seed*legacyMultiplier + legacyIncrement) & legacyMask
-	return int(r.seed >> (48 - bits))
-}
-
-func (r *LegacyRandom) NextInt(bound int) int {
-	if bound <= 0 {
-		return 0
-	}
-	if bound&(bound-1) == 0 {
-		return int((int64(bound) * int64(r.next(31))) >> 31)
-	}
-	for {
-		bits := r.next(31)
-		value := bits % bound
-		if bits-value+(bound-1) >= 0 {
-			return value
-		}
-	}
-}
-
-func (r *LegacyRandom) NextDouble() float64 {
-	return float64((int64(r.next(26))<<27)+int64(r.next(27))) * 1.1102230246251565e-16
-}
-
-func (r *LegacyRandom) ConsumeCount(rounds int) {
-	for i := 0; i < rounds; i++ {
-		r.next(32)
-	}
-}
-
 type SimplexNoise struct {
 	p          [256]int
 	xo, yo, zo float64
