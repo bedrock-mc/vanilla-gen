@@ -4707,41 +4707,70 @@ func (g Generator) sampleNoiseBasedCount(cfg gen.NoiseBasedCountPlacement, pos c
 	return count
 }
 
+// sampleHeightProvider mirrors the vanilla height providers exactly: no
+// clamping or swapping of the resolved anchors, and the same nextInt call
+// sequences.
 func (g Generator) sampleHeightProvider(provider gen.HeightProvider, minY, maxY int, rng *gen.WorldgenRandom) int {
-	low := clamp(g.anchorY(provider.MinInclusive, minY, maxY), minY, maxY)
-	high := clamp(g.anchorY(provider.MaxInclusive, minY, maxY), minY, maxY)
-	if high < low {
-		low, high = high, low
-	}
 	switch provider.Kind {
+	case "constant":
+		return g.anchorY(provider.Value, minY, maxY)
 	case "uniform":
-		if high <= low {
+		low := g.anchorY(provider.MinInclusive, minY, maxY)
+		high := g.anchorY(provider.MaxInclusive, minY, maxY)
+		if low > high {
 			return low
 		}
-		return low + int(rng.NextInt(uint32(high-low+1)))
+		return randomBetweenInclusive(rng, low, high)
 	case "trapezoid":
-		if high <= low {
+		low := g.anchorY(provider.MinInclusive, minY, maxY)
+		high := g.anchorY(provider.MaxInclusive, minY, maxY)
+		if low > high {
 			return low
 		}
 		span := high - low
-		return low + int(math.Round((rng.NextDouble()+rng.NextDouble())*float64(span)/2.0))
+		if provider.Plateau >= span {
+			return randomBetweenInclusive(rng, low, high)
+		}
+		plateauStart := (span - provider.Plateau) / 2
+		plateauEnd := span - plateauStart
+		return low + randomBetweenInclusive(rng, 0, plateauEnd) + randomBetweenInclusive(rng, 0, plateauStart)
 	case "biased_to_bottom":
-		if high <= low {
+		low := g.anchorY(provider.MinInclusive, minY, maxY)
+		high := g.anchorY(provider.MaxInclusive, minY, maxY)
+		if high-low-provider.Inner+1 <= 0 {
 			return low
 		}
-		width := high - low + 1
-		return low + int(rng.NextInt(uint32(max(1, int(rng.NextInt(uint32(width))+1)))))
+		limit := int(rng.NextInt(uint32(high - low - provider.Inner + 1)))
+		return int(rng.NextInt(uint32(limit+provider.Inner))) + low
 	case "very_biased_to_bottom":
-		if high <= low {
+		low := g.anchorY(provider.MinInclusive, minY, maxY)
+		high := g.anchorY(provider.MaxInclusive, minY, maxY)
+		if high-low-provider.Inner+1 <= 0 {
 			return low
 		}
-		width := high - low + 1
-		return low + int(rng.NextInt(uint32(max(1, int(rng.NextInt(uint32(max(1, int(rng.NextInt(uint32(width))+1))))+1)))))
+		upper := mthNextInt(rng, low+provider.Inner, high)
+		biasedUpper := mthNextInt(rng, low, upper-1)
+		return mthNextInt(rng, low, biasedUpper-1+provider.Inner)
 	case "clamped_normal":
+		low := g.anchorY(provider.MinInclusive, minY, maxY)
+		high := g.anchorY(provider.MaxInclusive, minY, maxY)
 		return clamp(int(math.Round(g.normalFloat64(rng, provider.Mean, provider.Deviation))), low, high)
 	default:
+		return g.anchorY(provider.MinInclusive, minY, maxY)
+	}
+}
+
+// randomBetweenInclusive mirrors Mth.randomBetweenInclusive.
+func randomBetweenInclusive(rng *gen.WorldgenRandom, low, high int) int {
+	return int(rng.NextInt(uint32(high-low+1))) + low
+}
+
+// mthNextInt mirrors Mth.nextInt: returns low when the range is empty.
+func mthNextInt(rng *gen.WorldgenRandom, low, high int) int {
+	if low >= high {
 		return low
 	}
+	return int(rng.NextInt(uint32(high-low+1))) + low
 }
 
 func (g Generator) anchorY(anchor gen.VerticalAnchor, minY, maxY int) int {

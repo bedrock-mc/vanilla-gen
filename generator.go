@@ -245,8 +245,10 @@ func (g Generator) prepareChunkForDecoration(pos world.ChunkPos, c *chunk.Chunk)
 	}
 
 	biomes := g.populateBiomeVolume(c, chunkX, chunkZ, minY, maxY)
-	g.carveTerrain(c, biomes, chunkX, chunkZ, minY, maxY, aquifer)
+	// Vanilla builds the surface before carving; carvers patch exposed dirt
+	// via the topMaterial fixup instead.
 	g.applySurfaceAndBiomes(c, biomes, chunkX, chunkZ, minY, maxY)
+	g.carveTerrain(c, biomes, chunkX, chunkZ, minY, maxY, aquifer)
 	g.decorateEndMainIsland(c, chunkX, chunkZ, minY, maxY)
 	return biomes, chunkX, chunkZ, minY, maxY
 }

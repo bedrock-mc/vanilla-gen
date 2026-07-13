@@ -716,12 +716,6 @@ func ruinedPortalTargetY(placement string, surfaceY, ySpan, minY, maxY int, rng 
 	}
 }
 
-func randomBetweenInclusive(rng *gen.WorldgenRandom, minValue, maxValue int) int {
-	if maxValue <= minValue {
-		return minValue
-	}
-	return minValue + int(rng.NextInt(uint32(maxValue-minValue+1)))
-}
 
 func (g Generator) buildOceanRuinPieces(def gen.OceanRuinStructureDef, position cube.Pos, rotation structureRotation, isLarge bool, baseIntegrity float64, rng *gen.WorldgenRandom) ([]plannedStructurePiece, string, bool) {
 	switch def.BiomeTemp {

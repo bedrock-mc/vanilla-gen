@@ -1048,6 +1048,9 @@ type HeightProvider struct {
 	Kind         string
 	MinInclusive VerticalAnchor
 	MaxInclusive VerticalAnchor
+	Value        VerticalAnchor
+	Plateau      int
+	Inner        int
 	Mean         float64
 	Deviation    float64
 	Raw          json.RawMessage
@@ -1063,6 +1066,15 @@ func (p *HeightProvider) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	p.Kind = normalizeIdentifier(probe.Type)
+	if p.Kind == "" {
+		// A bare vertical anchor acts as a constant height provider.
+		var anchor VerticalAnchor
+		if err := json.Unmarshal(data, &anchor); err == nil && anchor.Kind != "" {
+			p.Kind = "constant"
+			p.Value = anchor
+			return nil
+		}
+	}
 	switch p.Kind {
 	case "uniform":
 		var raw struct {
@@ -1078,12 +1090,29 @@ func (p *HeightProvider) UnmarshalJSON(data []byte) error {
 		var raw struct {
 			MinInclusive VerticalAnchor `json:"min_inclusive"`
 			MaxInclusive VerticalAnchor `json:"max_inclusive"`
+			Plateau      int            `json:"plateau"`
+			Inner        *int           `json:"inner"`
 		}
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return err
 		}
 		p.MinInclusive = raw.MinInclusive
 		p.MaxInclusive = raw.MaxInclusive
+		p.Plateau = raw.Plateau
+		// Vanilla's biased providers default inner to 1.
+		if raw.Inner != nil {
+			p.Inner = *raw.Inner
+		} else {
+			p.Inner = 1
+		}
+	case "constant":
+		var raw struct {
+			Value VerticalAnchor `json:"value"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return err
+		}
+		p.Value = raw.Value
 	case "clamped_normal":
 		var raw struct {
 			MinInclusive VerticalAnchor `json:"min_inclusive"`
