@@ -216,7 +216,8 @@ func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVo
 			return false
 		}
 		for _, entry := range cfg.Features {
-			if rng.NextDouble() < entry.Chance {
+			// RandomSelectorFeature rolls nextFloat (not nextDouble).
+			if rng.NextFloat() < float32(entry.Chance) {
 				return g.executePlacedFeatureRef(c, biomes, pos, entry.Feature, topFeatureName, chunkX, chunkZ, minY, maxY, rng, depth+1)
 			}
 		}
@@ -233,7 +234,8 @@ func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVo
 		if err != nil {
 			return false
 		}
-		if rng.NextDouble() < 0.5 {
+		// RandomBooleanSelectorFeature uses nextBoolean (one next(1) draw).
+		if rng.NextBool() {
 			return g.executePlacedFeatureRef(c, biomes, pos, cfg.FeatureTrue, topFeatureName, chunkX, chunkZ, minY, maxY, rng, depth+1)
 		}
 		return g.executePlacedFeatureRef(c, biomes, pos, cfg.FeatureFalse, topFeatureName, chunkX, chunkZ, minY, maxY, rng, depth+1)
@@ -5293,13 +5295,11 @@ func sampleTreeHeight(placer gen.TypedJSONValue, rng *gen.WorldgenRandom) (int, 
 	if err := json.Unmarshal(placer.Data, &raw); err != nil {
 		return 0, placer.Type
 	}
-	height := raw.BaseHeight
-	if raw.HeightRandA > 0 {
-		height += int(rng.NextInt(uint32(raw.HeightRandA + 1)))
-	}
-	if raw.HeightRandB > 0 {
-		height += int(rng.NextInt(uint32(raw.HeightRandB + 1)))
-	}
+	// TrunkPlacer.getTreeHeight always consumes both draws: nextInt(1) when
+	// the rand is 0 still advances the RNG.
+	height := raw.BaseHeight +
+		int(rng.NextInt(uint32(raw.HeightRandA+1))) +
+		int(rng.NextInt(uint32(raw.HeightRandB+1)))
 	return height, placer.Type
 }
 
