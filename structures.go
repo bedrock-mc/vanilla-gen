@@ -689,7 +689,11 @@ func (g Generator) planStructureStart(planner structurePlanner, startChunk world
 	return start, true
 }
 
-func (g Generator) structurePlacementExcludedByOtherSet(planner structurePlanner, startChunk world.ChunkPos, minY, maxY int, surfaceSampler *structureHeightSampler) bool {
+// structurePlacementExcludedByOtherSet ports ExclusionZone.isPlacementForbidden:
+// vanilla only tests the other set's PLACEMENT (grid position, frequency and
+// its own exclusions) via hasStructureChunkInRange - no biome checks and no
+// structure planning.
+func (g Generator) structurePlacementExcludedByOtherSet(planner structurePlanner, startChunk world.ChunkPos, _, _ int, _ *structureHeightSampler) bool {
 	otherSet := normalizeStructureName(planner.randomPlacement.ExclusionZone.OtherSet)
 	chunkCount := planner.randomPlacement.ExclusionZone.ChunkCount
 	if otherSet == "" || chunkCount <= 0 || otherSet == planner.setName {
@@ -700,23 +704,34 @@ func (g Generator) structurePlacementExcludedByOtherSet(planner structurePlanner
 	if !ok {
 		return false
 	}
-	if surfaceSampler == nil {
-		surfaceSampler = newStructureHeightSampler(g, minY, maxY)
-	}
 
-	minChunkX := int(startChunk[0]) - chunkCount
-	maxChunkX := int(startChunk[0]) + chunkCount
-	minChunkZ := int(startChunk[1]) - chunkCount
-	maxChunkZ := int(startChunk[1]) + chunkCount
-	for _, otherStartChunk := range g.plannerPotentialStartChunksNearChunk(otherPlanner, int(startChunk[0]), int(startChunk[1]), chunkCount, chunkCount) {
-		if int(otherStartChunk[0]) < minChunkX || int(otherStartChunk[0]) > maxChunkX || int(otherStartChunk[1]) < minChunkZ || int(otherStartChunk[1]) > maxChunkZ {
-			continue
-		}
-		if _, exists := g.planStructureStart(otherPlanner, otherStartChunk, minY, maxY, surfaceSampler); exists {
-			return true
+	for testX := int(startChunk[0]) - chunkCount; testX <= int(startChunk[0])+chunkCount; testX++ {
+		for testZ := int(startChunk[1]) - chunkCount; testZ <= int(startChunk[1])+chunkCount; testZ++ {
+			if g.isPlacementStructureChunk(otherPlanner, testX, testZ) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// isPlacementStructureChunk ports StructurePlacement.isStructureChunk for
+// random_spread placements (the only kind vanilla exclusion zones reference).
+func (g Generator) isPlacementStructureChunk(planner structurePlanner, chunkX, chunkZ int) bool {
+	placement := planner.randomPlacement
+	if placement.Spacing <= 0 {
+		return false
+	}
+	gridX := floorDiv(chunkX, placement.Spacing)
+	gridZ := floorDiv(chunkZ, placement.Spacing)
+	pos := randomSpreadPotentialChunk(g.seed, placement, gridX, gridZ)
+	if int(pos[0]) != chunkX || int(pos[1]) != chunkZ {
+		return false
+	}
+	if !structurePlacementAllows(g.seed, placement, chunkX, chunkZ) {
+		return false
+	}
+	return !g.structurePlacementExcludedByOtherSet(planner, world.ChunkPos{int32(chunkX), int32(chunkZ)}, 0, 0, nil)
 }
 
 func (g Generator) chooseStructureForPlanner(planner structurePlanner, biome gen.Biome, startChunk world.ChunkPos) (structurePlannerCandidate, bool) {

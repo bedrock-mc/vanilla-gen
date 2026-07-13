@@ -28,6 +28,9 @@ func TestDebugTargetPairs(t *testing.T) {
 		t.Fatalf("open region dir: %v", err)
 	}
 	chunkRange := 2
+	if os.Getenv("DEBUG_FULL") != "" {
+		chunkRange = 8
+	}
 	h := newChunkParityHarness(parityWorldSeed(t))
 	r := h.g.dimension.Range()
 	count := 0
@@ -89,8 +92,12 @@ func TestDebugSurface(t *testing.T) {
 	columns, heightDiff, topDiff, bandBad, bandTotal := 0, 0, 0, 0, 0
 	topPairs := map[string]int{}
 	bandPairs := map[string]int{}
-	for cx := -2; cx < 2; cx++ {
-		for cz := -2; cz < 2; cz++ {
+	chunkRange := 2
+	if os.Getenv("DEBUG_FULL") != "" {
+		chunkRange = 8
+	}
+	for cx := -chunkRange; cx < chunkRange; cx++ {
+		for cz := -chunkRange; cz < chunkRange; cz++ {
 			jc, err := w.Chunk(cx, cz)
 			if err != nil {
 				t.Fatalf("chunk: %v", err)

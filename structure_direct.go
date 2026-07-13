@@ -1,7 +1,6 @@
 package vanilla
 
 import (
-	"math"
 	"strings"
 
 	gen "github.com/bedrock-mc/vanilla-gen/gen"
@@ -49,44 +48,44 @@ func estimateDirectStructureBackreach(structureName, structureType string) (int,
 	}
 }
 
+// structurePlacementAllows ports StructurePlacement.applyAdditionalChunkRestrictions
+// with the exact FrequencyReductionMethod reducers, including the default
+// reducer's scrambled setLargeFeatureWithSalt argument order.
 func structurePlacementAllows(seed int64, placement gen.RandomSpreadPlacement, sourceX, sourceZ int) bool {
-	if placement.Frequency <= 0 {
-		return false
-	}
-	if placement.Frequency >= 1 {
+	if !(float32(placement.Frequency) < 1.0) {
 		return true
 	}
+	probability := float32(placement.Frequency)
 	switch placement.FrequencyReductionMethod {
 	case "legacy_type_2":
-		return structurePlacementProbability(seed, 10387320, sourceX, sourceZ, placement.Frequency)
+		// legacyArbitrarySaltProbabilityReducer: fixed salt 10387320.
+		rng := gen.NewWorldgenRandomLegacy(0)
+		rng.SetLargeFeatureWithSalt(seed, sourceX, sourceZ, 10387320)
+		return rng.NextFloat() < probability
 	case "legacy_type_3":
-		return structurePlacementLegacyDoubleProbability(seed, sourceX, sourceZ, placement.Frequency)
+		// legacyProbabilityReducerWithDouble: setLargeFeatureSeed + nextDouble.
+		rng := gen.NewWorldgenRandomLegacy(0)
+		rng.SetLargeFeatureSeed(seed, sourceX, sourceZ)
+		return rng.NextDouble() < float64(probability)
 	case "legacy_type_1":
-		return structurePlacementLegacyType1(seed, sourceX, sourceZ, placement.Frequency)
+		// legacyPillagerOutpostReducer.
+		if probability <= 0 {
+			return false
+		}
+		cx := sourceX >> 4
+		cz := sourceZ >> 4
+		rng := gen.NewWorldgenRandomLegacy(0)
+		rng.SetSeed(int64(int32(cx)^int32(cz)<<4) ^ seed)
+		rng.NextIntUnbounded()
+		return rng.NextInt(uint32(1.0/probability)) == 0
 	default:
-		return structurePlacementProbability(seed, placement.Salt, sourceX, sourceZ, placement.Frequency)
+		// probabilityReducer: note vanilla passes (seed, salt, x, z) into
+		// setLargeFeatureWithSalt(seed, x, z, salt) - the salt takes the
+		// x-coefficient slot and sourceZ becomes the additive salt.
+		rng := gen.NewWorldgenRandomLegacy(0)
+		rng.SetLargeFeatureWithSalt(seed, placement.Salt, sourceX, sourceZ)
+		return rng.NextFloat() < probability
 	}
-}
-
-func structurePlacementProbability(seed int64, salt, sourceX, sourceZ int, probability float64) bool {
-	rng := newLegacyRandom(int64(sourceX)*341873128712 + int64(sourceZ)*132897987541 + seed + int64(salt))
-	return rng.NextFloat64() < probability
-}
-
-func structurePlacementLegacyDoubleProbability(seed int64, sourceX, sourceZ int, probability float64) bool {
-	rng := newLegacyRandom(int64(sourceX)*341873128712 + int64(sourceZ)*132897987541 + seed)
-	return rng.NextDouble() < probability
-}
-
-func structurePlacementLegacyType1(seed int64, sourceX, sourceZ int, probability float64) bool {
-	if probability <= 0 {
-		return false
-	}
-	cx := sourceX >> 4
-	cz := sourceZ >> 4
-	rng := newLegacyRandom(int64(cx^(cz<<4)) ^ seed)
-	_ = rng.next(32)
-	return rng.NextInt(int(math.Max(1, 1.0/probability))) == 0
 }
 
 func (g Generator) structureCandidateAllowed(candidate structurePlannerCandidate, biome gen.Biome) bool {
