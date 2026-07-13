@@ -386,9 +386,9 @@ func (g *Graph) evalCommon(node Node, ctx FunctionContext, noises NoiseSource, d
 	case OpShiftedNoise:
 		return noises.Sample(
 			node.Noise,
-			(float64(ctx.BlockX)+dep(node.Dep0))*node.XZScale,
-			(float64(ctx.BlockY)+dep(node.Dep1))*node.YScale,
-			(float64(ctx.BlockZ)+dep(node.Dep2))*node.XZScale,
+			float64(ctx.BlockX)*node.XZScale+dep(node.Dep0),
+			float64(ctx.BlockY)*node.YScale+dep(node.Dep1),
+			float64(ctx.BlockZ)*node.XZScale+dep(node.Dep2),
 		)
 	case OpYClampedGradient:
 		return yClampedGradient(ctx.BlockY, node.FromY, node.ToY, node.FromValue, node.ToValue)
@@ -416,11 +416,11 @@ func (g *Graph) evalCommon(node Node, ctx FunctionContext, noises NoiseSource, d
 		rarity := rarityValue(node.Rarity, input)
 		return rarity * math.Abs(noises.Sample(node.Noise, float64(ctx.BlockX)/rarity, float64(ctx.BlockY)/rarity, float64(ctx.BlockZ)/rarity))
 	case OpShiftA:
-		return noises.Sample(node.Noise, float64(ctx.BlockX), 0, float64(ctx.BlockZ)) * 4
+		return noises.Sample(node.Noise, float64(ctx.BlockX)*0.25, 0, float64(ctx.BlockZ)*0.25) * 4.0
 	case OpShiftB:
-		return noises.Sample(node.Noise, float64(ctx.BlockZ), float64(ctx.BlockX), 0) * 4
+		return noises.Sample(node.Noise, float64(ctx.BlockZ)*0.25, float64(ctx.BlockX)*0.25, 0) * 4.0
 	case OpShift:
-		return noises.Sample(node.Noise, float64(ctx.BlockX), 0, float64(ctx.BlockZ)) * 4
+		return noises.Sample(node.Noise, float64(ctx.BlockX)*0.25, float64(ctx.BlockY)*0.25, float64(ctx.BlockZ)*0.25) * 4.0
 	case OpOldBlendedNoise:
 		return noises.SampleBlendedNoise(
 			float64(ctx.BlockX),
@@ -455,51 +455,69 @@ func FindTopSurface(blockX, blockZ, lowerBound, upperBound, cellHeight int, dens
 	return float64(lowerBound)
 }
 
+// evalSpline mirrors CubicSpline.Multipoint.apply: all arithmetic is float32
+// like vanilla, values beyond the first/last location are linearly extended
+// with the edge derivative, and the interior uses vanilla's exact lerp form.
 func evalSpline(spline *Spline, evalArg func(ArgRef) float64) float64 {
+	return float64(evalSplineF(spline, evalArg))
+}
+
+func evalSplineF(spline *Spline, evalArg func(ArgRef) float64) float32 {
 	if spline == nil || len(spline.Points) == 0 {
 		return 0
 	}
-	coord := evalArg(spline.Coordinate)
-	if coord <= spline.Points[0].Location {
-		return evalSplineValue(spline.Points[0].Value, evalArg)
-	}
+	coord := float32(evalArg(spline.Coordinate))
+	n := len(spline.Points)
 
-	last := spline.Points[len(spline.Points)-1]
-	if coord >= last.Location {
-		return evalSplineValue(last.Value, evalArg)
-	}
-
-	for i := 0; i < len(spline.Points)-1; i++ {
-		p0 := spline.Points[i]
-		p1 := spline.Points[i+1]
-		if coord >= p1.Location && i < len(spline.Points)-2 {
-			continue
+	// Index of the last location <= coord, -1 when coord precedes them all.
+	i := -1
+	for k := 0; k < n; k++ {
+		if float32(spline.Points[k].Location) <= coord {
+			i = k
+		} else {
+			break
 		}
-
-		v0 := evalSplineValue(p0.Value, evalArg)
-		v1 := evalSplineValue(p1.Value, evalArg)
-		dt := p1.Location - p0.Location
-		if dt == 0 {
-			return v1
-		}
-		t := (coord - p0.Location) / dt
-		t2 := t * t
-		t3 := t2 * t
-		h00 := 2*t3 - 3*t2 + 1
-		h10 := t3 - 2*t2 + t
-		h01 := -2*t3 + 3*t2
-		h11 := t3 - t2
-		return h00*v0 + h10*dt*p0.Derivative + h01*v1 + h11*dt*p1.Derivative
 	}
 
-	return evalSplineValue(last.Value, evalArg)
+	j := n - 1
+	if i < 0 {
+		return splineLinearExtend(coord, spline, 0, evalArg)
+	}
+	if i == j {
+		return splineLinearExtend(coord, spline, j, evalArg)
+	}
+
+	p0 := spline.Points[i]
+	p1 := spline.Points[i+1]
+	loc0 := float32(p0.Location)
+	loc1 := float32(p1.Location)
+	f3 := (coord - loc0) / (loc1 - loc0)
+	f6 := evalSplineValueF(p0.Value, evalArg)
+	f7 := evalSplineValueF(p1.Value, evalArg)
+	f8 := float32(p0.Derivative)*(loc1-loc0) - (f7 - f6)
+	f9 := -float32(p1.Derivative)*(loc1-loc0) + (f7 - f6)
+	return lerpF(f3, f6, f7) + f3*(1.0-f3)*lerpF(f3, f8, f9)
 }
 
-func evalSplineValue(value SplineValue, evalArg func(ArgRef) float64) float64 {
-	if value.Nested != nil {
-		return evalSpline(value.Nested, evalArg)
+func splineLinearExtend(coord float32, spline *Spline, i int, evalArg func(ArgRef) float64) float32 {
+	p := spline.Points[i]
+	value := evalSplineValueF(p.Value, evalArg)
+	derivative := float32(p.Derivative)
+	if derivative == 0.0 {
+		return value
 	}
-	return value.Const
+	return value + derivative*(coord-float32(p.Location))
+}
+
+func lerpF(t, a, b float32) float32 {
+	return a + t*(b-a)
+}
+
+func evalSplineValueF(value SplineValue, evalArg func(ArgRef) float64) float32 {
+	if value.Nested != nil {
+		return evalSplineF(value.Nested, evalArg)
+	}
+	return float32(value.Const)
 }
 
 func yClampedGradient(y, fromY, toY int, fromValue, toValue float64) float64 {

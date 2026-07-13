@@ -1,5 +1,17 @@
 package gen
 
+import (
+	"crypto/md5"
+	"encoding/binary"
+)
+
+// seedFromHashOf mirrors RandomSupport.seedFromHashOf: the two halves of the
+// MD5 digest of the string, read big-endian.
+func seedFromHashOf(s string) (uint64, uint64) {
+	d := md5.Sum([]byte(s))
+	return binary.BigEndian.Uint64(d[0:8]), binary.BigEndian.Uint64(d[8:16])
+}
+
 type Xoroshiro128 struct {
 	low      uint64
 	high     uint64
@@ -77,6 +89,12 @@ func (f PositionalRandomFactory) ForkOreRandom() PositionalRandomFactory {
 
 func (f PositionalRandomFactory) fromHashOf(hashLo, hashHi int64) Xoroshiro128 {
 	return NewXoroshiro128FromState(uint64(hashLo^f.seedLo), uint64(hashHi^f.seedHi))
+}
+
+// FromHashOf mirrors XoroshiroPositionalRandomFactory.fromHashOf(String).
+func (f PositionalRandomFactory) FromHashOf(name string) Xoroshiro128 {
+	lo, hi := seedFromHashOf(name)
+	return NewXoroshiro128FromState(lo^uint64(f.seedLo), hi^uint64(f.seedHi))
 }
 
 func (x *Xoroshiro128) NextLong() uint64 {

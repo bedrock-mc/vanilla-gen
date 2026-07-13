@@ -1,6 +1,11 @@
 package gen
 
-import "math"
+import (
+	"math"
+	"strconv"
+)
+
+func itoaSigned(v int) string { return strconv.Itoa(v) }
 
 type NoiseRegistry struct {
 	noises       []DoublePerlinNoise
@@ -8,16 +13,85 @@ type NoiseRegistry struct {
 	endIslands   EndIslandDensity
 }
 
+// noiseIDs maps NoiseRef ordinals to the vanilla worldgen/noise registry ids,
+// in the same alphabetical order as the generated NoiseParams table.
+var noiseIDs = [...]string{
+	"aquifer_barrier",
+	"aquifer_fluid_level_floodedness",
+	"aquifer_fluid_level_spread",
+	"aquifer_lava",
+	"badlands_pillar",
+	"badlands_pillar_roof",
+	"badlands_surface",
+	"calcite",
+	"cave_cheese",
+	"cave_entrance",
+	"cave_layer",
+	"clay_bands_offset",
+	"continentalness",
+	"continentalness_large",
+	"erosion",
+	"erosion_large",
+	"gravel",
+	"gravel_layer",
+	"ice",
+	"iceberg_pillar",
+	"iceberg_pillar_roof",
+	"iceberg_surface",
+	"jagged",
+	"nether_state_selector",
+	"nether_wart",
+	"netherrack",
+	"noodle",
+	"noodle_ridge_a",
+	"noodle_ridge_b",
+	"noodle_thickness",
+	"offset",
+	"ore_gap",
+	"ore_vein_a",
+	"ore_vein_b",
+	"ore_veininess",
+	"packed_ice",
+	"patch",
+	"pillar",
+	"pillar_rareness",
+	"pillar_thickness",
+	"powder_snow",
+	"ridge",
+	"soul_sand_layer",
+	"spaghetti_2d",
+	"spaghetti_2d_elevation",
+	"spaghetti_2d_modulator",
+	"spaghetti_2d_thickness",
+	"spaghetti_3d_1",
+	"spaghetti_3d_2",
+	"spaghetti_3d_rarity",
+	"spaghetti_3d_thickness",
+	"spaghetti_roughness",
+	"spaghetti_roughness_modulator",
+	"surface",
+	"surface_secondary",
+	"surface_swamp",
+	"temperature",
+	"temperature_large",
+	"vegetation",
+	"vegetation_large",
+}
+
+// NewNoiseRegistry mirrors RandomState: a positional random factory forked
+// from XoroshiroRandomSource(seed), with every noise instantiated from
+// factory.fromHashOf("minecraft:<id>") and the legacy blended terrain noise
+// from factory.fromHashOf("minecraft:terrain").
 func NewNoiseRegistry(seed int64) *NoiseRegistry {
+	factory := NewPositionalRandomFactory(seed)
+
 	noises := make([]DoublePerlinNoise, len(NoiseParams))
 	for i, params := range NoiseParams {
-		saltedSeed := seed*31 + int64(i)
-		rng := NewXoroshiro128FromSeed(saltedSeed)
+		rng := factory.FromHashOf("minecraft:" + noiseIDs[i])
 		noises[i] = NewDoublePerlinNoise(&rng, params.Amplitudes, params.FirstOctave)
 	}
 
-	blendedSeed := seed*31 + 1000
-	blendedRng := NewXoroshiro128FromSeed(blendedSeed)
+	blendedRng := factory.FromHashOf("minecraft:terrain")
 	return &NoiseRegistry{
 		noises: noises,
 		blendedNoise: NewBlendedNoise(
@@ -49,15 +123,16 @@ func (n *NoiseRegistry) SampleEndIslands(blockX, blockZ int) float64 {
 }
 
 type PerlinNoise struct {
-	d          [257]int32
-	a          float64
-	b          float64
-	c          float64
-	amplitude  float64
-	lacunarity float64
-	h2         int32
-	d2         float64
-	t2         float64
+	d           [257]int32
+	a           float64
+	b           float64
+	c           float64
+	amplitude   float64
+	valueFactor float64
+	lacunarity  float64
+	h2          int32
+	d2          float64
+	t2          float64
 }
 
 func NewPerlinNoise(rng *Xoroshiro128) PerlinNoise {
@@ -205,45 +280,11 @@ type OctaveNoise struct {
 	octaves []PerlinNoise
 }
 
-var md5OctaveN = [13][2]uint64{
-	{0xb198de63a8012672, 0x7b84cad43ef7b5a8},
-	{0x0fd787bfbc403ec3, 0x74a4a31ca21b48b8},
-	{0x36d326eed40efeb2, 0x5be9ce18223c636a},
-	{0x082fe255f8be6631, 0x4e96119e22dedc81},
-	{0x0ef68ec68504005e, 0x48b6bf93a2789640},
-	{0xf11268128982754f, 0x257a1d670430b0aa},
-	{0xe51c98ce7d1de664, 0x5f9478a733040c45},
-	{0x6d7b49e7e429850a, 0x2e3063c622a24777},
-	{0xbd90d5377ba1b762, 0xc07317d419a7548d},
-	{0x53d39c6752dac858, 0xbcd1c5a80ab65b3e},
-	{0xb4a24d7a84e7677b, 0x023ff9668e89b5c4},
-	{0xdffa22b534c5f608, 0xb9b67517d3665ca9},
-	{0xd50708086cef4d7c, 0x6e1651ecc7f43309},
-}
-
 func NewOctaveNoise(rng *Xoroshiro128, amplitudes []float64, omin int) OctaveNoise {
-	persistIni := []float64{
-		0.0,
-		1.0,
-		0.6666666666666666,
-		0.5714285714285714,
-		0.5333333333333333,
-		0.5161290322580645,
-		0.5079365079365079,
-		0.503937007874016,
-		0.5019607843137255,
-		0.5009775171065493,
-		0.50048828125,
-	}
-
-	lacuna := 1.0
-	persist := 0.0
-	if len(amplitudes) < len(persistIni) {
-		persist = persistIni[len(amplitudes)]
-	} else {
-		pow := 1 << len(amplitudes)
-		persist = float64(pow) / float64(pow-1)
-	}
+	// Mirrors PerlinNoise: lowestFreqInputFactor = 2^firstOctave,
+	// lowestFreqValueFactor = 2^(n-1) / (2^n - 1).
+	lacuna := math.Pow(2.0, float64(omin))
+	persist := math.Pow(2.0, float64(len(amplitudes)-1)) / (math.Pow(2.0, float64(len(amplitudes))) - 1.0)
 
 	xLo := rng.NextLong()
 	xHi := rng.NextLong()
@@ -251,36 +292,36 @@ func NewOctaveNoise(rng *Xoroshiro128, amplitudes []float64, omin int) OctaveNoi
 
 	for i, amp := range amplitudes {
 		if amp != 0 {
-			octaveIdx := 12 + omin + i
-			if octaveIdx >= 0 && octaveIdx < len(md5OctaveN) {
-				md5 := md5OctaveN[octaveIdx]
-				pxr := NewXoroshiro128FromState(xLo^md5[0], xHi^md5[1])
-				noise := NewPerlinNoise(&pxr)
-				noise.amplitude = amp * persist
-				noise.lacunarity = lacuna
-				octaves = append(octaves, noise)
-			}
+			lo, hi := seedFromHashOf("octave_" + itoaSigned(omin+i))
+			pxr := NewXoroshiro128FromState(xLo^lo, xHi^hi)
+			noise := NewPerlinNoise(&pxr)
+			noise.amplitude = amp
+			noise.valueFactor = persist
+			noise.lacunarity = lacuna
+			octaves = append(octaves, noise)
 		}
-		lacuna *= 2
-		persist *= 0.5
+		lacuna *= 2.0
+		persist /= 2.0
 	}
 
 	return OctaveNoise{octaves: octaves}
 }
 
+// Sample mirrors PerlinNoise.getValue: value += amplitude * noise * valueFactor
+// with coordinates wrapped after the frequency multiply.
 func (o *OctaveNoise) Sample(x, y, z float64) float64 {
 	value := 0.0
 	for i := range o.octaves {
 		octave := &o.octaves[i]
 		lf := octave.lacunarity
-		value += octave.amplitude * octave.Sample(x*lf, y*lf, z*lf)
+		noiseVal := octave.Sample(wrapCoord(x*lf), wrapCoord(y*lf), wrapCoord(z*lf))
+		value += octave.amplitude * noiseVal * octave.valueFactor
 	}
 	return value
 }
 
 type DoublePerlinNoise struct {
 	amplitude float64
-	frequency float64
 	octA      OctaveNoise
 	octB      OctaveNoise
 }
@@ -289,55 +330,39 @@ func NewDoublePerlinNoise(rng *Xoroshiro128, amplitudes []float64, omin int) Dou
 	octA := NewOctaveNoise(rng, amplitudes, omin)
 	octB := NewOctaveNoise(rng, amplitudes, omin)
 
-	length := len(amplitudes)
-	for i := len(amplitudes) - 1; i >= 0; i-- {
-		if amplitudes[i] != 0 {
-			break
+	// Mirrors NormalNoise: valueFactor = 1/6 / expectedDeviation(span) where
+	// span is the index distance between the first and last non-zero
+	// amplitudes.
+	minOctave := len(amplitudes)
+	maxOctave := -1
+	for i, amp := range amplitudes {
+		if amp != 0.0 {
+			if i < minOctave {
+				minOctave = i
+			}
+			if i > maxOctave {
+				maxOctave = i
+			}
 		}
-		length--
 	}
-	for _, amp := range amplitudes {
-		if amp != 0 {
-			break
-		}
-		length--
-	}
-
-	ampIni := []float64{
-		0.0,
-		0.8333333333333334,
-		1.1111111111111112,
-		1.25,
-		1.3333333333333333,
-		1.3888888888888888,
-		1.4285714285714286,
-		1.4583333333333333,
-		1.4814814814814814,
-		1.5,
-		1.5151515151515151,
-	}
-
-	amplitude := 0.0
-	if length >= 0 && length < len(ampIni) {
-		amplitude = ampIni[length]
-	} else if length > 0 {
-		amplitude = (5.0 / 3.0) * float64(length) / float64(length+1)
-	}
+	span := maxOctave - minOctave
+	expectedDeviation := 0.1 * (1.0 + 1.0/float64(span+1))
 
 	return DoublePerlinNoise{
-		amplitude: amplitude,
-		frequency: math.Pow(2, float64(omin)),
+		amplitude: 0.16666666666666666 / expectedDeviation,
 		octA:      octA,
 		octB:      octB,
 	}
 }
 
+// Sample mirrors NormalNoise.getValue; the per-octave frequency (including
+// 2^firstOctave) is applied inside OctaveNoise.Sample like vanilla.
 func (d *DoublePerlinNoise) Sample(x, y, z float64) float64 {
-	const factor = 337.0 / 331.0
-	nx := x * d.frequency
-	ny := y * d.frequency
-	nz := z * d.frequency
-	return (d.octA.Sample(nx, ny, nz) + d.octB.Sample(nx*factor, ny*factor, nz*factor)) * d.amplitude
+	const inputFactor = 1.0181268882175227
+	x2 := x * inputFactor
+	y2 := y * inputFactor
+	z2 := z * inputFactor
+	return (d.octA.Sample(x, y, z) + d.octB.Sample(x2, y2, z2)) * d.amplitude
 }
 
 type BlendedNoise struct {
@@ -437,9 +462,10 @@ func (b *BlendedNoise) Sample(x, y, z float64) float64 {
 	return clampedLerp(q, l/512.0, m/512.0) / 128.0
 }
 
+// wrapCoord mirrors PerlinNoise.wrap: round-to-nearest multiple of 2^25.
 func wrapCoord(value float64) float64 {
-	const coordRange = 33554432.0
-	return value - math.Floor(value/coordRange)*coordRange
+	const coordRange = 3.3554432e7
+	return value - math.Floor(value/coordRange+0.5)*coordRange
 }
 
 func clampedLerp(t, a, b float64) float64 {
