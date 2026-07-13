@@ -164,14 +164,9 @@ func (g Generator) runPlacedFeature(c *chunk.Chunk, biomes sourceBiomeVolume, ch
 
 	origin := cube.Pos{chunkX * 16, minY, chunkZ * 16}
 	rng := g.featureRNG(decorationSeed, featureIndex, step)
-	positions, ok := g.applyPlacementModifiers(c, biomes, []cube.Pos{origin}, placed.Placement, featureName, chunkX, chunkZ, minY, maxY, rng)
-	if !ok {
-		return
-	}
-
-	for _, pos := range positions {
+	g.placeWithModifiers(c, biomes, origin, placed.Placement, featureName, chunkX, chunkZ, minY, maxY, rng, func(pos cube.Pos) {
 		g.executeConfiguredFeature(c, biomes, pos, placed.Feature, featureName, chunkX, chunkZ, minY, maxY, rng, 0)
-	}
+	})
 }
 
 func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, featureRef gen.ConfiguredFeatureRef, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, depth int) bool {
@@ -523,17 +518,12 @@ func (g Generator) executePlacedFeatureRef(c *chunk.Chunk, biomes sourceBiomeVol
 	if topFeatureName == "" {
 		topFeatureName = placedRef.Name
 	}
-	positions, ok := g.applyPlacementModifiers(c, biomes, []cube.Pos{pos}, placed.Placement, topFeatureName, chunkX, chunkZ, minY, maxY, rng)
-	if !ok {
-		return false
-	}
-
 	var placedAny bool
-	for _, candidate := range positions {
+	g.placeWithModifiers(c, biomes, pos, placed.Placement, topFeatureName, chunkX, chunkZ, minY, maxY, rng, func(candidate cube.Pos) {
 		if g.executeConfiguredFeature(c, biomes, candidate, placed.Feature, topFeatureName, chunkX, chunkZ, minY, maxY, rng, depth+1) {
 			placedAny = true
 		}
-	}
+	})
 	return placedAny
 }
 
@@ -3313,210 +3303,183 @@ func (g Generator) alterGroundAroundTree(c *chunk.Chunk, origin cube.Pos, provid
 	}
 }
 
-func (g Generator) applyPlacementModifiers(c *chunk.Chunk, biomes sourceBiomeVolume, positions []cube.Pos, modifiers []gen.PlacementModifier, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) ([]cube.Pos, bool) {
-	out := slices.Clone(positions)
+// placeWithModifiers mirrors PlacedFeature.placeWithContext: each position
+// flows depth-first through the remaining modifiers and then the feature body
+// before the next position is pulled, so RNG consumption interleaves exactly
+// like vanilla's lazy stream pipeline.
+func (g Generator) placeWithModifiers(c *chunk.Chunk, biomes sourceBiomeVolume, origin cube.Pos, modifiers []gen.PlacementModifier, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, place func(cube.Pos)) bool {
+	return g.placeModifierStep(c, biomes, origin, modifiers, 0, topFeatureName, chunkX, chunkZ, minY, maxY, rng, place)
+}
 
-	for _, modifier := range modifiers {
-		switch modifier.Type {
-		case "count":
-			cfg, err := modifier.Count()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				for i := 0; i < g.sampleIntProvider(cfg.Count, rng); i++ {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		case "count_on_every_layer":
-			cfg, err := modifier.CountOnEveryLayer()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				for layer := 0; ; layer++ {
-					foundAny := false
-					attempts := g.sampleIntProvider(cfg.Count, rng)
-					for i := 0; i < attempts; i++ {
-						localX := int(rng.NextInt(16))
-						localZ := int(rng.NextInt(16))
-						y, ok := g.findCountOnEveryLayerY(c, localX, localZ, layer, minY, maxY)
-						if !ok {
-							continue
-						}
-						next = append(next, cube.Pos{pos[0] + localX, y, pos[2] + localZ})
-						foundAny = true
-					}
-					if !foundAny {
-						break
-					}
-				}
-			}
-			out = next
-		case "noise_threshold_count":
-			cfg, err := modifier.NoiseThresholdCount()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				count := cfg.BelowNoise
-				if g.featureCountNoise(pos[0], pos[2]) > cfg.NoiseLevel {
-					count = cfg.AboveNoise
-				}
-				for i := 0; i < count; i++ {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		case "noise_based_count":
-			cfg, err := modifier.NoiseBasedCount()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				count := g.sampleNoiseBasedCount(cfg, pos)
-				for i := 0; i < count; i++ {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		case "rarity_filter":
-			cfg, err := modifier.RarityFilter()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				if cfg.Chance <= 1 || rng.NextInt(uint32(cfg.Chance)) == 0 {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		case "in_square":
-			for i, pos := range out {
-				pos[0] = chunkX*16 + int(rng.NextInt(16))
-				pos[2] = chunkZ*16 + int(rng.NextInt(16))
-				out[i] = pos
-			}
-		case "height_range":
-			cfg, err := modifier.HeightRange()
-			if err != nil {
-				return nil, false
-			}
-			for i, pos := range out {
-				pos[1] = g.sampleHeightProvider(cfg.Height, minY, maxY, rng)
-				out[i] = pos
-			}
-		case "heightmap":
-			cfg, err := modifier.Heightmap()
-			if err != nil {
-				return nil, false
-			}
-			for i, pos := range out {
-				localX := pos[0] - chunkX*16
-				localZ := pos[2] - chunkZ*16
-				pos[1] = g.heightmapPlacementY(c, localX, localZ, cfg.Heightmap, minY, maxY)
-				out[i] = pos
-			}
-		case "surface_water_depth_filter":
-			cfg, err := modifier.SurfaceWaterDepthFilter()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				if g.surfaceWaterDepthAt(c, pos[0]-chunkX*16, pos[2]-chunkZ*16, minY) <= cfg.MaxWaterDepth {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		case "biome":
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				if g.biomeGeneration.biomeHasFeature(g.zoomedBiomeAt(pos[0], pos[1], pos[2]), topFeatureName) {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		case "random_offset":
-			cfg, err := modifier.RandomOffset()
-			if err != nil {
-				return nil, false
-			}
-			for i, pos := range out {
-				pos[0] += g.sampleIntProvider(cfg.XZSpread, rng)
-				pos[1] += g.sampleIntProvider(cfg.YSpread, rng)
-				pos[2] += g.sampleIntProvider(cfg.XZSpread, rng)
-				out[i] = pos
-			}
-		case "fixed_placement":
-			cfg, err := modifier.FixedPlacement()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out)*max(1, len(cfg.Positions)))
-			for range out {
-				for _, fixed := range cfg.Positions {
-					next = append(next, cube.Pos(fixed))
-				}
-			}
-			out = next
-		case "environment_scan":
-			cfg, err := modifier.EnvironmentScan()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				if scanned, ok := g.scanEnvironment(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng); ok {
-					next = append(next, scanned)
-				}
-			}
-			out = next
-		case "surface_relative_threshold_filter":
-			cfg, err := modifier.SurfaceRelativeThresholdFilter()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				surfaceY := g.heightmapPlacementY(c, pos[0]-chunkX*16, pos[2]-chunkZ*16, cfg.Heightmap, minY, maxY)
-				delta := pos[1] - surfaceY
-				if cfg.MinInclusive != nil && delta < *cfg.MinInclusive {
-					continue
-				}
-				if cfg.MaxInclusive != nil && delta > *cfg.MaxInclusive {
-					continue
-				}
-				next = append(next, pos)
-			}
-			out = next
-		case "block_predicate_filter":
-			cfg, err := modifier.BlockPredicateFilter()
-			if err != nil {
-				return nil, false
-			}
-			next := make([]cube.Pos, 0, len(out))
-			for _, pos := range out {
-				if g.testBlockPredicate(c, pos, cfg.Predicate, chunkX, chunkZ, minY, maxY, rng) {
-					next = append(next, pos)
-				}
-			}
-			out = next
-		default:
-			return nil, false
-		}
-
-		if len(out) == 0 {
-			return nil, true
-		}
+func (g Generator) placeModifierStep(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, modifiers []gen.PlacementModifier, idx int, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, place func(cube.Pos)) bool {
+	if idx == len(modifiers) {
+		place(pos)
+		return true
 	}
-	return out, true
+	emit := func(p cube.Pos) bool {
+		return g.placeModifierStep(c, biomes, p, modifiers, idx+1, topFeatureName, chunkX, chunkZ, minY, maxY, rng, place)
+	}
+	modifier := modifiers[idx]
+	switch modifier.Type {
+	case "count":
+		cfg, err := modifier.Count()
+		if err != nil {
+			return false
+		}
+		n := g.sampleIntProvider(cfg.Count, rng)
+		for i := 0; i < n; i++ {
+			if !emit(pos) {
+				return false
+			}
+		}
+	case "count_on_every_layer":
+		cfg, err := modifier.CountOnEveryLayer()
+		if err != nil {
+			return false
+		}
+		// Vanilla samples the count on every loop-condition evaluation.
+		for layer := 0; ; layer++ {
+			foundAny := false
+			for i := 0; i < g.sampleIntProvider(cfg.Count, rng); i++ {
+				x := int(rng.NextInt(16)) + pos[0]
+				z := int(rng.NextInt(16)) + pos[2]
+				y, ok := g.findCountOnEveryLayerY(c, x-chunkX*16, z-chunkZ*16, layer, minY, maxY)
+				if !ok {
+					continue
+				}
+				if !emit(cube.Pos{x, y, z}) {
+					return false
+				}
+				foundAny = true
+			}
+			if !foundAny {
+				break
+			}
+		}
+	case "noise_threshold_count":
+		cfg, err := modifier.NoiseThresholdCount()
+		if err != nil {
+			return false
+		}
+		// Biome.BIOME_INFO_NOISE at x/200, z/200.
+		count := cfg.BelowNoise
+		if gen.BiomeInfoNoise(float64(pos[0])/200.0, float64(pos[2])/200.0) >= cfg.NoiseLevel {
+			count = cfg.AboveNoise
+		}
+		for i := 0; i < count; i++ {
+			if !emit(pos) {
+				return false
+			}
+		}
+	case "noise_based_count":
+		cfg, err := modifier.NoiseBasedCount()
+		if err != nil {
+			return false
+		}
+		noise := gen.BiomeInfoNoise(float64(pos[0])/cfg.NoiseFactor, float64(pos[2])/cfg.NoiseFactor)
+		count := int(math.Ceil((noise + cfg.NoiseOffset) * float64(cfg.NoiseToCountRatio)))
+		for i := 0; i < count; i++ {
+			if !emit(pos) {
+				return false
+			}
+		}
+	case "rarity_filter":
+		cfg, err := modifier.RarityFilter()
+		if err != nil {
+			return false
+		}
+		if rng.NextFloat() < 1.0/float32(cfg.Chance) {
+			return emit(pos)
+		}
+	case "in_square":
+		x := int(rng.NextInt(16)) + pos[0]
+		z := int(rng.NextInt(16)) + pos[2]
+		return emit(cube.Pos{x, pos[1], z})
+	case "height_range":
+		cfg, err := modifier.HeightRange()
+		if err != nil {
+			return false
+		}
+		return emit(cube.Pos{pos[0], g.sampleHeightProvider(cfg.Height, minY, maxY, rng), pos[2]})
+	case "heightmap":
+		cfg, err := modifier.Heightmap()
+		if err != nil {
+			return false
+		}
+		y := g.heightmapPlacementY(c, pos[0]-chunkX*16, pos[2]-chunkZ*16, cfg.Heightmap, minY, maxY)
+		if y > minY {
+			return emit(cube.Pos{pos[0], y, pos[2]})
+		}
+	case "surface_water_depth_filter":
+		cfg, err := modifier.SurfaceWaterDepthFilter()
+		if err != nil {
+			return false
+		}
+		if g.surfaceWaterDepthAt(c, pos[0]-chunkX*16, pos[2]-chunkZ*16, minY) <= cfg.MaxWaterDepth {
+			return emit(pos)
+		}
+	case "biome":
+		if g.biomeGeneration.biomeHasFeature(g.zoomedBiomeAt(pos[0], pos[1], pos[2]), topFeatureName) {
+			return emit(pos)
+		}
+	case "random_offset":
+		cfg, err := modifier.RandomOffset()
+		if err != nil {
+			return false
+		}
+		x := pos[0] + g.sampleIntProvider(cfg.XZSpread, rng)
+		y := pos[1] + g.sampleIntProvider(cfg.YSpread, rng)
+		z := pos[2] + g.sampleIntProvider(cfg.XZSpread, rng)
+		return emit(cube.Pos{x, y, z})
+	case "fixed_placement":
+		cfg, err := modifier.FixedPlacement()
+		if err != nil {
+			return false
+		}
+		// Vanilla only yields the fixed positions inside the origin's chunk.
+		originChunkX := pos[0] >> 4
+		originChunkZ := pos[2] >> 4
+		for _, fixed := range cfg.Positions {
+			if fixed[0]>>4 == originChunkX && fixed[2]>>4 == originChunkZ {
+				if !emit(cube.Pos(fixed)) {
+					return false
+				}
+			}
+		}
+	case "environment_scan":
+		cfg, err := modifier.EnvironmentScan()
+		if err != nil {
+			return false
+		}
+		if scanned, ok := g.scanEnvironment(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng); ok {
+			return emit(scanned)
+		}
+	case "surface_relative_threshold_filter":
+		cfg, err := modifier.SurfaceRelativeThresholdFilter()
+		if err != nil {
+			return false
+		}
+		surfaceY := g.heightmapPlacementY(c, pos[0]-chunkX*16, pos[2]-chunkZ*16, cfg.Heightmap, minY, maxY)
+		delta := pos[1] - surfaceY
+		if cfg.MinInclusive != nil && delta < *cfg.MinInclusive {
+			return true
+		}
+		if cfg.MaxInclusive != nil && delta > *cfg.MaxInclusive {
+			return true
+		}
+		return emit(pos)
+	case "block_predicate_filter":
+		cfg, err := modifier.BlockPredicateFilter()
+		if err != nil {
+			return false
+		}
+		if g.testBlockPredicate(c, pos, cfg.Predicate, chunkX, chunkZ, minY, maxY, rng) {
+			return emit(pos)
+		}
+	default:
+		return false
+	}
+	return true
 }
 
 func (g Generator) findCountOnEveryLayerY(c *chunk.Chunk, localX, localZ, layer, minY, maxY int) (int, bool) {

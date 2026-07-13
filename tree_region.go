@@ -157,19 +157,14 @@ func (g Generator) runPlacedFeatureWithRegion(region *treeDecorationRegion, step
 	decorationSeed := g.decorationSeed(region.centerChunkX, region.centerChunkZ)
 	origin := cube.Pos{region.centerChunkX * 16, region.minY, region.centerChunkZ * 16}
 	rng := g.featureRNG(decorationSeed, featureIndex, step)
-	positions, ok := g.applyPlacementModifiers(centerSlot.chunk, centerSlot.biomes, []cube.Pos{origin}, placed.Placement, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, rng)
-	if !ok {
-		return
-	}
-
 	regionMargin := g.decorationMarginForPlacedFeatureName(featureName)
-	for _, pos := range positions {
+	g.placeWithModifiers(centerSlot.chunk, centerSlot.biomes, origin, placed.Placement, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, rng, func(pos cube.Pos) {
 		executor := g
 		if regionMargin > 0 && needsDecorationRegionForPos(pos, region.centerChunkX, region.centerChunkZ, regionMargin) {
 			executor.activeTreeRegion = region
 		}
 		executor.executeConfiguredFeature(centerSlot.chunk, centerSlot.biomes, pos, placed.Feature, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, rng, 0)
-	}
+	})
 }
 
 func (g Generator) runPlacedTreeFeatureAcrossRegion(region *treeDecorationRegion, step gen.GenerationStep, featureName string, featureIndex int) {
@@ -189,10 +184,10 @@ func (g Generator) runPlacedTreeFeatureAcrossRegion(region *treeDecorationRegion
 
 			origin := cube.Pos{sourceChunkX * 16, region.minY, sourceChunkZ * 16}
 			rng := regionGenerator.featureRNG(regionGenerator.decorationSeed(sourceChunkX, sourceChunkZ), featureIndex, step)
-			positions, ok := regionGenerator.applyPlacementModifiers(
+			regionGenerator.placeWithModifiers(
 				slot.chunk,
 				slot.biomes,
-				[]cube.Pos{origin},
+				origin,
 				placed.Placement,
 				featureName,
 				sourceChunkX,
@@ -200,25 +195,22 @@ func (g Generator) runPlacedTreeFeatureAcrossRegion(region *treeDecorationRegion
 				region.minY,
 				region.maxY,
 				rng,
+				func(pos cube.Pos) {
+					regionGenerator.executeConfiguredFeature(
+						slot.chunk,
+						slot.biomes,
+						pos,
+						placed.Feature,
+						featureName,
+						sourceChunkX,
+						sourceChunkZ,
+						region.minY,
+						region.maxY,
+						rng,
+						0,
+					)
+				},
 			)
-			if !ok {
-				continue
-			}
-			for _, pos := range positions {
-				regionGenerator.executeConfiguredFeature(
-					slot.chunk,
-					slot.biomes,
-					pos,
-					placed.Feature,
-					featureName,
-					sourceChunkX,
-					sourceChunkZ,
-					region.minY,
-					region.maxY,
-					rng,
-					0,
-				)
-			}
 		}
 	}
 }

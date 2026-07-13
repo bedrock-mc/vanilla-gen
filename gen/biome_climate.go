@@ -152,3 +152,8 @@ func BiomeColdEnoughToSnow(biome Biome, x, y, z, seaLevel int) bool {
 func BiomeShouldMeltIceberg(biome Biome, x, y, z, seaLevel int) bool {
 	return BiomeTemperature(biome, x, y, z, seaLevel) > 0.1
 }
+
+// BiomeInfoNoise exposes Biome.BIOME_INFO_NOISE for placement modifiers.
+func BiomeInfoNoise(x, z float64) float64 {
+	return biomeInfoNoise.getValue(x, z)
+}
