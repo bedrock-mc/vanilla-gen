@@ -11,9 +11,25 @@ type BiomeSource interface {
 }
 
 type presetBiomeSource struct {
-	preset string
-	noise  BiomeNoise
-	cache  sync.Map
+	preset     string
+	noise      BiomeNoise
+	graph      *Graph
+	graphRoots [6]int
+	noises     *NoiseRegistry
+	rtree      *climateRTree
+	cache      sync.Map
+}
+
+var (
+	overworldRTreeOnce sync.Once
+	overworldRTree     *climateRTree
+)
+
+func overworldClimateRTree() *climateRTree {
+	overworldRTreeOnce.Do(func() {
+		overworldRTree = newClimateRTree(overworldBiomePoints)
+	})
+	return overworldRTree
 }
 
 type endBiomeSource struct {
@@ -57,7 +73,18 @@ func NewBiomeSource(seed int64, registry *WorldgenRegistry, name string) (BiomeS
 
 	switch def.Preset {
 	case "overworld":
-		return &presetBiomeSource{preset: def.Preset, noise: NewBiomeNoise(seed)}, nil
+		// Vanilla Climate.Sampler samples the noise router's climate density
+		// functions, so the overworld source evaluates the graph roots.
+		noises := NewNoiseRegistry(seed)
+		var roots [6]int
+		for i, slot := range [6]string{"temperature", "vegetation", "continents", "erosion", "depth", "ridges"} {
+			idx, ok := OverworldRoots[slot]
+			if !ok {
+				return nil, fmt.Errorf("overworld graph missing climate root %q", slot)
+			}
+			roots[i] = idx
+		}
+		return &presetBiomeSource{preset: def.Preset, noise: NewBiomeNoise(seed), graph: OverworldGraph, graphRoots: roots, noises: noises, rtree: overworldClimateRTree()}, nil
 	case "nether":
 		return &presetBiomeSource{preset: def.Preset, noise: NewBiomeNoise(seed)}, nil
 	default:
@@ -66,6 +93,16 @@ func NewBiomeSource(seed int64, registry *WorldgenRegistry, name string) (BiomeS
 }
 
 func (s *presetBiomeSource) SampleClimate(x, y, z int) [6]int64 {
+	if s.graph != nil {
+		ctx := FunctionContext{BlockX: x, BlockY: y, BlockZ: z}
+		var climate [6]int64
+		for i, root := range s.graphRoots {
+			// Climate.target casts to float and quantizeCoord multiplies in
+			// float32 before truncating.
+			climate[i] = int64(float32(s.graph.Eval(root, ctx, s.noises, nil, nil, nil)) * 10000.0)
+		}
+		return climate
+	}
 	return s.noise.SampleClimate(x, y, z)
 }
 
@@ -78,7 +115,7 @@ func (s *presetBiomeSource) GetBiome(x, y, z int) Biome {
 	var biome Biome
 	switch s.preset {
 	case "overworld":
-		biome = lookupOverworldPresetBiome(climate)
+		biome = s.rtree.Lookup(climate)
 	case "nether":
 		biome = lookupPresetBiome(climate, netherPresetPoints)
 	default:
