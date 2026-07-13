@@ -655,3 +655,30 @@ func (g Generator) configuredFeatureRefNeedsDecorationRegion(ref gen.ConfiguredF
 		return false
 	}
 }
+
+// replaySourceFeature runs one placed feature from a single source chunk's
+// decoration, writing wherever it reaches within the region (the center chunk
+// keeps the result). Part of the chunk-major replay ordering.
+func (g Generator) replaySourceFeature(region *treeDecorationRegion, sourceChunkX, sourceChunkZ int, step gen.GenerationStep, featureName string, featureIndex int) {
+	placed, err := g.features.Placed(featureName)
+	if err != nil {
+		return
+	}
+	slot, ok := region.ensureSlot(sourceChunkX, sourceChunkZ)
+	if !ok {
+		return
+	}
+	if region.centerChunk == nil {
+		if centerSlot, ok := region.slot(region.centerChunkX, region.centerChunkZ); ok {
+			region.centerChunk = centerSlot.chunk
+		}
+	}
+
+	regionGenerator := g
+	regionGenerator.activeTreeRegion = region
+	origin := cube.Pos{sourceChunkX * 16, region.minY, sourceChunkZ * 16}
+	rng := regionGenerator.featureRNG(regionGenerator.decorationSeed(sourceChunkX, sourceChunkZ), featureIndex, step)
+	regionGenerator.placeWithModifiers(slot.chunk, slot.biomes, origin, placed.Placement, featureName, sourceChunkX, sourceChunkZ, region.minY, region.maxY, rng, func(pos cube.Pos) {
+		regionGenerator.executeConfiguredFeature(slot.chunk, slot.biomes, pos, placed.Feature, featureName, sourceChunkX, sourceChunkZ, region.minY, region.maxY, rng, 0)
+	})
+}

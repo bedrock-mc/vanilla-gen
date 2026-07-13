@@ -50,18 +50,13 @@ func (g Generator) decorateFeatures(c *chunk.Chunk, biomes sourceBiomeVolume, ch
 	}
 }
 
+// decorateFeaturesAndStructures replays decoration chunk-major like the saved
+// vanilla worlds: each source chunk's full decoration runs in row-major order
+// (z then x ascending, matching sequential chunk generation), so a later
+// source's earlier-index feature can overwrite an earlier source's blocks at
+// chunk borders exactly like vanilla's ordered chunk pipeline.
 func (g Generator) decorateFeaturesAndStructures(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int) {
-	var (
-		possibleBiomes []gen.Biome
-		decorationSeed int64
-		treeRegion     *treeDecorationRegion
-	)
-	if g.features != nil && g.biomeGeneration != nil {
-		possibleBiomes = g.collectPossibleFeatureBiomes(chunkX, chunkZ, minY, maxY)
-		if len(possibleBiomes) > 0 {
-			decorationSeed = g.decorationSeed(chunkX, chunkZ)
-		}
-	}
+	hasFeatures := g.features != nil && g.biomeGeneration != nil
 	regionFeatureCache := make(map[string]bool)
 
 	var surfaceSampler *structureHeightSampler
@@ -69,29 +64,52 @@ func (g Generator) decorateFeaturesAndStructures(c *chunk.Chunk, biomes sourceBi
 		surfaceSampler = newStructureHeightSampler(g, minY, maxY)
 	}
 
-	for stepIndex := 0; stepIndex < featureStepCount; stepIndex++ {
-		step := gen.GenerationStep(stepIndex)
-		if surfaceSampler != nil {
-			g.placeStructuresForStep(c, biomes, chunkX, chunkZ, minY, maxY, step, surfaceSampler)
+	var treeRegion *treeDecorationRegion
+	needsRegion := func(featureName string) bool {
+		v, ok := regionFeatureCache[featureName]
+		if !ok {
+			v = g.placedFeatureNeedsDecorationRegion(featureName)
+			regionFeatureCache[featureName] = v
 		}
-		if len(possibleBiomes) == 0 {
-			continue
-		}
-		for _, featureIndex := range g.biomeGeneration.featureIndexesForStep(possibleBiomes, step) {
-			featureName := g.biomeGeneration.stepFeatures[stepIndex].features[featureIndex]
-			needsRegion, ok := regionFeatureCache[featureName]
-			if !ok {
-				needsRegion = g.placedFeatureNeedsDecorationRegion(featureName)
-				regionFeatureCache[featureName] = needsRegion
-			}
-			if needsRegion {
-				if treeRegion == nil {
-					treeRegion = newTreeDecorationRegion(g, c, biomes, chunkX, chunkZ, minY, maxY)
+		return v
+	}
+
+	for sourceChunkZ := chunkZ - 1; sourceChunkZ <= chunkZ+1; sourceChunkZ++ {
+		for sourceChunkX := chunkX - 1; sourceChunkX <= chunkX+1; sourceChunkX++ {
+			isCenter := sourceChunkX == chunkX && sourceChunkZ == chunkZ
+
+			var possibleBiomes []gen.Biome
+			var decorationSeed int64
+			if hasFeatures {
+				possibleBiomes = g.collectPossibleFeatureBiomes(sourceChunkX, sourceChunkZ, minY, maxY)
+				if len(possibleBiomes) > 0 {
+					decorationSeed = g.decorationSeed(sourceChunkX, sourceChunkZ)
 				}
-				g.runPlacedFeatureAcrossRegion(treeRegion, step, featureName, featureIndex)
-				continue
 			}
-			g.runPlacedFeature(c, biomes, chunkX, chunkZ, minY, maxY, step, featureName, featureIndex, decorationSeed)
+
+			for stepIndex := 0; stepIndex < featureStepCount; stepIndex++ {
+				step := gen.GenerationStep(stepIndex)
+				if isCenter && surfaceSampler != nil {
+					g.placeStructuresForStep(c, biomes, chunkX, chunkZ, minY, maxY, step, surfaceSampler)
+				}
+				if len(possibleBiomes) == 0 {
+					continue
+				}
+				for _, featureIndex := range g.biomeGeneration.featureIndexesForStep(possibleBiomes, step) {
+					featureName := g.biomeGeneration.stepFeatures[stepIndex].features[featureIndex]
+					replay := needsRegion(featureName)
+					if !replay {
+						if isCenter {
+							g.runPlacedFeature(c, biomes, chunkX, chunkZ, minY, maxY, step, featureName, featureIndex, decorationSeed)
+						}
+						continue
+					}
+					if treeRegion == nil {
+						treeRegion = newTreeDecorationRegion(g, c, biomes, chunkX, chunkZ, minY, maxY)
+					}
+					g.replaySourceFeature(treeRegion, sourceChunkX, sourceChunkZ, step, featureName, featureIndex)
+				}
+			}
 		}
 	}
 }
@@ -725,29 +743,31 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 	sizeY := 2 * (2 + maxRadius)
 
 	// OreFeature aborts unless some column in the probe square reaches the
-	// ocean floor heightmap; underground this passes on the first column.
-	probeFloor := func(localX, localZ int) int {
+	// ocean floor heightmap. Out-of-chunk columns resolve through the region
+	// slots: vanilla's neighbours sit at pre-feature status during
+	// decoration, which is exactly the proto-chunk state they hold.
+	probeFloor := func(worldX, worldZ int) int {
 		region := g.activeTreeRegion
-		if region == nil {
-			return g.columnHeightmapY(c, localX, localZ, "OCEAN_FLOOR", minY, maxY)
+		key := oreProbeKey{chunkX: floorDiv(worldX, 16), chunkZ: floorDiv(worldZ, 16), localX: int8(worldX & 15), localZ: int8(worldZ & 15)}
+		if region != nil {
+			if floor, ok := region.oreProbeFloor[key]; ok {
+				return floor
+			}
 		}
-		key := oreProbeKey{chunkX: chunkX, chunkZ: chunkZ, localX: int8(localX), localZ: int8(localZ)}
-		if floor, ok := region.oreProbeFloor[key]; ok {
-			return floor
+		target := g.chunkForActiveTreePos(c, cube.Pos{worldX, 0, worldZ})
+		floor := g.columnHeightmapY(target, worldX&15, worldZ&15, "OCEAN_FLOOR", minY, maxY)
+		if region != nil {
+			if region.oreProbeFloor == nil {
+				region.oreProbeFloor = make(map[oreProbeKey]int, 256)
+			}
+			region.oreProbeFloor[key] = floor
 		}
-		floor := g.columnHeightmapY(c, localX, localZ, "OCEAN_FLOOR", minY, maxY)
-		if region.oreProbeFloor == nil {
-			region.oreProbeFloor = make(map[oreProbeKey]int, 256)
-		}
-		region.oreProbeFloor[key] = floor
 		return floor
 	}
 	probed := false
 	for xprobe := xStart; xprobe <= xStart+sizeXZ && !probed; xprobe++ {
 		for zprobe := zStart; zprobe <= zStart+sizeXZ; zprobe++ {
-			localX := clamp(xprobe-chunkX*16, 0, 15)
-			localZ := clamp(zprobe-chunkZ*16, 0, 15)
-			if yStart <= probeFloor(localX, localZ) {
+			if yStart <= probeFloor(xprobe, zprobe) {
 				probed = true
 				break
 			}
