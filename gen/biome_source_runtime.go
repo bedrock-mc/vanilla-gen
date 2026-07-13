@@ -11,13 +11,14 @@ type BiomeSource interface {
 }
 
 type presetBiomeSource struct {
-	preset     string
-	noise      BiomeNoise
-	graph      *Graph
-	graphRoots [6]int
-	noises     *NoiseRegistry
-	rtree      *climateRTree
-	cache      sync.Map
+	preset      string
+	noise       BiomeNoise
+	graph       *Graph
+	graphRoots  [6]int
+	noises      *NoiseRegistry
+	rtree       *climateRTree
+	cache       sync.Map
+	scratchPool *sync.Pool
 }
 
 var (
@@ -84,7 +85,12 @@ func NewBiomeSource(seed int64, registry *WorldgenRegistry, name string) (BiomeS
 			}
 			roots[i] = idx
 		}
-		return &presetBiomeSource{preset: def.Preset, noise: NewBiomeNoise(seed), graph: OverworldGraph, graphRoots: roots, noises: noises, rtree: overworldClimateRTree()}, nil
+		graph := OverworldGraph
+		return &presetBiomeSource{
+			preset: def.Preset, noise: NewBiomeNoise(seed), graph: graph, graphRoots: roots,
+			noises: noises, rtree: overworldClimateRTree(),
+			scratchPool: &sync.Pool{New: func() any { return NewEvalScratch(graph) }},
+		}, nil
 	case "nether":
 		return &presetBiomeSource{preset: def.Preset, noise: NewBiomeNoise(seed)}, nil
 	default:
@@ -95,11 +101,16 @@ func NewBiomeSource(seed int64, registry *WorldgenRegistry, name string) (BiomeS
 func (s *presetBiomeSource) SampleClimate(x, y, z int) [6]int64 {
 	if s.graph != nil {
 		ctx := FunctionContext{BlockX: x, BlockY: y, BlockZ: z}
+		var scratch *EvalScratch
+		if s.scratchPool != nil {
+			scratch = s.scratchPool.Get().(*EvalScratch)
+			defer s.scratchPool.Put(scratch)
+		}
 		var climate [6]int64
 		for i, root := range s.graphRoots {
 			// Climate.target casts to float and quantizeCoord multiplies in
 			// float32 before truncating.
-			climate[i] = int64(float32(s.graph.Eval(root, ctx, s.noises, nil, nil, nil)) * 10000.0)
+			climate[i] = int64(float32(s.graph.Eval(root, ctx, s.noises, nil, nil, scratch)) * 10000.0)
 		}
 		return climate
 	}

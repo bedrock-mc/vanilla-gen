@@ -242,9 +242,9 @@ func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVo
 		if err != nil {
 			return false
 		}
-		return g.executeSeagrass(c, pos, cfg, minY, maxY, rng)
+		return g.executeSeagrass(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng)
 	case "kelp":
-		return g.executeKelp(c, pos, minY, maxY, rng)
+		return g.executeKelp(c, pos, chunkX, chunkZ, minY, maxY, rng)
 	case "multiface_growth":
 		cfg, err := feature.MultifaceGrowth()
 		if err != nil {
@@ -572,49 +572,101 @@ func (g Generator) executeBlockColumn(c *chunk.Chunk, origin cube.Pos, cfg gen.B
 	return placedAny
 }
 
-func (g Generator) executeSeagrass(c *chunk.Chunk, pos cube.Pos, cfg gen.SeagrassConfig, minY, maxY int, rng *gen.WorldgenRandom) bool {
-	if pos[1] <= minY || pos[1] >= maxY {
+// executeSeagrass ports SeagrassFeature.place: two nextInt(8)-nextInt(8)
+// offsets, the OCEAN_FLOOR heightmap column, water check, then the tall/short
+// probability roll and the sturdy-floor canSurvive test.
+func (g Generator) executeSeagrass(c *chunk.Chunk, pos cube.Pos, cfg gen.SeagrassConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
+	xo := int(rng.NextInt(8)) - int(rng.NextInt(8))
+	zo := int(rng.NextInt(8)) - int(rng.NextInt(8))
+	column := cube.Pos{pos[0] + xo, pos[1], pos[2] + zo}
+	if !g.positionInFeatureScope(column, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
-	if c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0) != g.waterRID {
+	y := g.heightmapPlacementYAtPos(c, column, "OCEAN_FLOOR", chunkX, chunkZ, minY, maxY)
+	target := cube.Pos{column[0], y, column[2]}
+	// Blocks.WATER covers both source and flowing water in Java.
+	if !g.positionInFeatureScope(target, chunkX, chunkZ, minY, maxY) || !g.isJavaWaterName(g.blockNameAt(c, target)) {
 		return false
 	}
-	belowRID := c.Block(uint8(pos[0]&15), int16(pos[1]-1), uint8(pos[2]&15), 0)
-	if !g.isSolidRID(belowRID) {
+	tall := rng.NextDouble() < cfg.Probability
+	// SeagrassBlock/TallSeagrassBlock.canSurvive: block below must have a
+	// sturdy up face and not be magma.
+	below := target.Side(cube.FaceDown)
+	if below[1] < minY || !g.positionInFeatureScope(below, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
-
-	if cfg.Probability > 0 && rng.NextDouble() < cfg.Probability {
-		upper := pos.Side(cube.FaceUp)
-		if upper[1] <= maxY && c.Block(uint8(upper[0]&15), int16(upper[1]), uint8(upper[2]&15), 0) == g.waterRID {
-			return g.setBlockStateDirect(c, pos, gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "lower"}}) &&
-				g.setBlockStateDirect(c, upper, gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "upper"}})
+	belowName := g.blockNameAt(c, below)
+	if !g.javaSolidName(belowName) || belowName == "magma" {
+		return false
+	}
+	if tall {
+		// TallSeagrassBlock.canSurvive additionally requires a source water
+		// block (fluid amount 8) at the lower position.
+		if g.runtimeIDAt(c, target) != g.waterRID {
+			return false
 		}
+		upper := target.Side(cube.FaceUp)
+		if upper[1] <= maxY && g.positionInFeatureScope(upper, chunkX, chunkZ, minY, maxY) && g.isJavaWaterName(g.blockNameAt(c, upper)) {
+			_ = g.setBlockStateDirect(c, target, gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "lower"}})
+			_ = g.setBlockStateDirect(c, upper, gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "upper"}})
+		}
+		// Vanilla reports success as soon as canSurvive passed, even when
+		// the upper block was not water and nothing was placed.
+		return true
 	}
-	return g.setBlockStateDirect(c, pos, gen.BlockState{Name: "seagrass"})
+	_ = g.setBlockStateDirect(c, target, gen.BlockState{Name: "seagrass"})
+	return true
 }
 
-func (g Generator) executeKelp(c *chunk.Chunk, pos cube.Pos, minY, maxY int, rng *gen.WorldgenRandom) bool {
-	if pos[1] <= minY || pos[1] >= maxY {
+// kelpCanSurviveAt mirrors KelpBlock/KelpPlantBlock.canSurvive at pos: the
+// block below is kelp, kelp_plant, or a non-magma block with a sturdy up face.
+func (g Generator) kelpCanSurviveAt(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int) bool {
+	below := pos.Side(cube.FaceDown)
+	if below[1] < minY || !g.positionInFeatureScope(below, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
-	if c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0) != g.waterRID {
+	name := g.blockNameAt(c, below)
+	if name == "magma" {
 		return false
 	}
+	return name == "kelp" || name == "kelp_plant" || g.javaSolidName(name)
+}
 
-	height := 1 + int(rng.NextInt(10))
-	var placedAny bool
-	for i := 0; i < height && pos[1]+i <= maxY; i++ {
-		current := pos.Add(cube.Pos{0, i, 0})
-		if c.Block(uint8(current[0]&15), int16(current[1]), uint8(current[2]&15), 0) != g.waterRID {
-			break
-		}
-		if !g.setBlockStateDirect(c, current, gen.BlockState{Name: "kelp", Properties: map[string]string{"age": strconv.Itoa(int(rng.NextInt(25)))}}) {
-			break
-		}
-		placedAny = true
+// executeKelp ports KelpFeature.place: grow kelp_plant bodies from the
+// OCEAN_FLOOR column upward with a kelp head (age 20-23) on top, including
+// the early-termination fallback that retops the column one block down.
+func (g Generator) executeKelp(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
+	y := g.heightmapPlacementYAtPos(c, pos, "OCEAN_FLOOR", chunkX, chunkZ, minY, maxY)
+	current := cube.Pos{pos[0], y, pos[2]}
+	waterAt := func(p cube.Pos) bool {
+		return p[1] > minY && p[1] <= maxY && g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) &&
+			g.isJavaWaterName(g.blockNameAt(c, p))
 	}
-	return placedAny
+	placed := 0
+	if waterAt(current) {
+		height := 1 + int(rng.NextInt(10))
+		for i := 0; i <= height; i++ {
+			if waterAt(current) && waterAt(current.Side(cube.FaceUp)) && g.kelpCanSurviveAt(c, current, chunkX, chunkZ, minY, maxY) {
+				if i == height {
+					_ = g.setBlockStateDirect(c, current, gen.BlockState{Name: "kelp", Properties: map[string]string{"age": strconv.Itoa(int(rng.NextInt(4)) + 20)}})
+					placed++
+				} else {
+					_ = g.setBlockStateDirect(c, current, gen.BlockState{Name: "kelp_plant"})
+				}
+			} else if i > 0 {
+				below := current.Side(cube.FaceDown)
+				belowBelow := below.Side(cube.FaceDown)
+				if g.kelpCanSurviveAt(c, below, chunkX, chunkZ, minY, maxY) &&
+					(!g.positionInFeatureScope(belowBelow, chunkX, chunkZ, minY, maxY) || g.blockNameAt(c, belowBelow) != "kelp") {
+					_ = g.setBlockStateDirect(c, below, gen.BlockState{Name: "kelp", Properties: map[string]string{"age": strconv.Itoa(int(rng.NextInt(4)) + 20)}})
+					placed++
+				}
+				break
+			}
+			current = current.Side(cube.FaceUp)
+		}
+	}
+	return placed > 0
 }
 
 func (g Generator) executeMultifaceGrowth(c *chunk.Chunk, pos cube.Pos, cfg gen.MultifaceGrowthConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
@@ -666,12 +718,28 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 
 	// OreFeature aborts unless some column in the probe square reaches the
 	// ocean floor heightmap; underground this passes on the first column.
+	probeFloor := func(localX, localZ int) int {
+		region := g.activeTreeRegion
+		if region == nil {
+			return g.columnHeightmapY(c, localX, localZ, "OCEAN_FLOOR", minY, maxY)
+		}
+		key := oreProbeKey{chunkX: chunkX, chunkZ: chunkZ, localX: int8(localX), localZ: int8(localZ)}
+		if floor, ok := region.oreProbeFloor[key]; ok {
+			return floor
+		}
+		floor := g.columnHeightmapY(c, localX, localZ, "OCEAN_FLOOR", minY, maxY)
+		if region.oreProbeFloor == nil {
+			region.oreProbeFloor = make(map[oreProbeKey]int, 256)
+		}
+		region.oreProbeFloor[key] = floor
+		return floor
+	}
 	probed := false
 	for xprobe := xStart; xprobe <= xStart+sizeXZ && !probed; xprobe++ {
 		for zprobe := zStart; zprobe <= zStart+sizeXZ; zprobe++ {
 			localX := clamp(xprobe-chunkX*16, 0, 15)
 			localZ := clamp(zprobe-chunkZ*16, 0, 15)
-			if yStart <= g.columnHeightmapY(c, localX, localZ, "OCEAN_FLOOR", minY, maxY) {
+			if yStart <= probeFloor(localX, localZ) {
 				probed = true
 				break
 			}
@@ -715,7 +783,9 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 		}
 	}
 
-	tested := make(map[int]struct{}, 64)
+	// Vanilla uses a BitSet over the probe volume; a word slice avoids the
+	// per-position map allocations.
+	tested := make([]uint64, (sizeXZ*sizeXZ*sizeY+63)/64+1)
 	placed := false
 	for i := 0; i < size; i++ {
 		radius := data[i*4+3]
@@ -747,10 +817,15 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 						continue
 					}
 					bitIndex := x - xStart + (y-yStart)*sizeXZ + (z-zStart)*sizeXZ*sizeY
-					if _, seen := tested[bitIndex]; seen {
+					word, mask := bitIndex>>6, uint64(1)<<(uint(bitIndex)&63)
+					for word >= len(tested) {
+						// java.util.BitSet grows on demand.
+						tested = append(tested, 0)
+					}
+					if tested[word]&mask != 0 {
 						continue
 					}
-					tested[bitIndex] = struct{}{}
+					tested[word] |= mask
 					orePos := cube.Pos{x, y, z}
 					// ensureCanWrite: only positions we can materialize.
 					if !g.positionInFeatureScope(orePos, chunkX, chunkZ, minY, maxY) {
@@ -1069,12 +1144,32 @@ func (g Generator) executeLargeDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen.L
 	return placedDown || placedUp
 }
 
+// executeGeode ports GeodeFeature.place exactly: RNG order is
+// distributionPoints sample, crack-size nextDouble, crack-chance nextFloat,
+// then per-point outerWallDistance x3 + pointOffset samples, the optional
+// crack-direction nextInt(4), and per-inner-layer-block nextFloat rolls while
+// scanning the gen cube in BlockPos.betweenClosed order (x fastest, z
+// slowest). The noise is the world-seeded legacy NormalNoise(-4, [1.0]).
 func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	type geodePoint struct {
 		pos    cube.Pos
 		offset int
 	}
-	numPoints := max(1, g.sampleIntProvider(cfg.DistributionPoints, rng))
+	numPoints := g.sampleIntProvider(cfg.DistributionPoints, rng)
+	noise := gen.NewGeodeNoise(g.seed)
+
+	crackSizeAdjustment := float64(numPoints) / float64(max(1, cfg.OuterWallDistance.MaxInclusive))
+	innerAir := 1.0 / math.Sqrt(cfg.Layers.Filling)
+	innermostBlockLayer := 1.0 / math.Sqrt(cfg.Layers.InnerLayer+crackSizeAdjustment)
+	innerCrust := 1.0 / math.Sqrt(cfg.Layers.MiddleLayer+crackSizeAdjustment)
+	outerCrust := 1.0 / math.Sqrt(cfg.Layers.OuterLayer+crackSizeAdjustment)
+	crackExtra := 0.0
+	if numPoints > 3 {
+		crackExtra = crackSizeAdjustment
+	}
+	crackSize := 1.0 / math.Sqrt(cfg.Crack.BaseCrackSize+rng.NextDouble()/2.0+crackExtra)
+	shouldCrack := float64(rng.NextFloat()) < cfg.Crack.GenerateCrackChance
+
 	points := make([]geodePoint, 0, numPoints)
 	numInvalid := 0
 	for range numPoints {
@@ -1082,25 +1177,19 @@ func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfi
 		y := g.sampleIntProvider(cfg.OuterWallDistance, rng)
 		z := g.sampleIntProvider(cfg.OuterWallDistance, rng)
 		pointPos := pos.Add(cube.Pos{x, y, z})
-		if !g.positionInFeatureScope(pointPos, chunkX, chunkZ, minY, maxY) {
-			numInvalid++
-			continue
-		}
-		name := g.blockNameAt(c, pointPos)
-		if name == "air" || g.matchesFeatureBlockTag(name, cfg.Blocks.InvalidBlocks) {
-			numInvalid++
-			if numInvalid > cfg.InvalidBlocksThreshold {
-				return false
+		if g.positionInFeatureScope(pointPos, chunkX, chunkZ, minY, maxY) {
+			name := g.blockNameAt(c, pointPos)
+			if name == "air" || g.matchesFeatureBlockTag(name, cfg.Blocks.InvalidBlocks) {
+				numInvalid++
+				if numInvalid > cfg.InvalidBlocksThreshold {
+					return false
+				}
 			}
 		}
-		points = append(points, geodePoint{pos: pointPos, offset: max(1, g.sampleIntProvider(cfg.PointOffset, rng))})
-	}
-	if len(points) == 0 {
-		return false
+		points = append(points, geodePoint{pos: pointPos, offset: g.sampleIntProvider(cfg.PointOffset, rng)})
 	}
 
 	var crackPoints []cube.Pos
-	shouldCrack := rng.NextDouble() < cfg.Crack.GenerateCrackChance
 	if shouldCrack {
 		crackOffset := numPoints*2 + 1
 		switch int(rng.NextInt(4)) {
@@ -1115,28 +1204,14 @@ func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfi
 		}
 	}
 
-	crackSizeAdjustment := float64(numPoints) / float64(max(1, cfg.OuterWallDistance.MaxInclusive))
-	innerAir := 1.0 / math.Sqrt(cfg.Layers.Filling)
-	innermostBlockLayer := 1.0 / math.Sqrt(cfg.Layers.InnerLayer+crackSizeAdjustment)
-	innerCrust := 1.0 / math.Sqrt(cfg.Layers.MiddleLayer+crackSizeAdjustment)
-	outerCrust := 1.0 / math.Sqrt(cfg.Layers.OuterLayer+crackSizeAdjustment)
-	crackSize := 1.0 / math.Sqrt(cfg.Crack.BaseCrackSize+rng.NextDouble()/2.0+func() float64 {
-		if numPoints > 3 {
-			return crackSizeAdjustment
-		}
-		return 0
-	}())
-
 	var potentialCrystalPlacements []cube.Pos
 	placedAny := false
-	for x := pos[0] + cfg.MinGenOffset; x <= pos[0]+cfg.MaxGenOffset; x++ {
+	// BlockPos.betweenClosed iterates x fastest, then y, then z.
+	for z := pos[2] + cfg.MinGenOffset; z <= pos[2]+cfg.MaxGenOffset; z++ {
 		for y := pos[1] + cfg.MinGenOffset; y <= pos[1]+cfg.MaxGenOffset; y++ {
-			for z := pos[2] + cfg.MinGenOffset; z <= pos[2]+cfg.MaxGenOffset; z++ {
+			for x := pos[0] + cfg.MinGenOffset; x <= pos[0]+cfg.MaxGenOffset; x++ {
 				pointInside := cube.Pos{x, y, z}
-				if !g.positionInFeatureScope(pointInside, chunkX, chunkZ, minY, maxY) {
-					continue
-				}
-				noiseOffset := g.geodeNoiseValue(pointInside) * cfg.NoiseMultiplier
+				noiseOffset := noise.GetValue(float64(x), float64(y), float64(z)) * cfg.NoiseMultiplier
 				distSumShell := 0.0
 				distSumCrack := 0.0
 				for _, point := range points {
@@ -1158,7 +1233,9 @@ func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfi
 						placedAny = true
 					}
 				case distSumShell >= innermostBlockLayer:
-					useAlt := rng.NextDouble() < cfg.UseAlternateLayer0Chance
+					// Both nextFloat rolls happen regardless of whether the
+					// block write succeeds.
+					useAlt := float64(rng.NextFloat()) < cfg.UseAlternateLayer0Chance
 					provider := cfg.Blocks.InnerLayerProvider
 					if useAlt {
 						provider = cfg.Blocks.AlternateInnerLayerProvider
@@ -1166,14 +1243,14 @@ func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfi
 					if state, ok := g.selectState(c, provider, pointInside, rng, minY, maxY); ok && g.setGeodeState(c, pointInside, state, cfg.Blocks.CannotReplace, chunkX, chunkZ, minY, maxY) {
 						placedAny = true
 					}
-					if (!cfg.PlacementsRequireLayer0Alt || useAlt) && rng.NextDouble() < cfg.UsePotentialPlacementsChance {
+					if (!cfg.PlacementsRequireLayer0Alt || useAlt) && float64(rng.NextFloat()) < cfg.UsePotentialPlacementsChance {
 						potentialCrystalPlacements = append(potentialCrystalPlacements, pointInside)
 					}
 				case distSumShell >= innerCrust:
 					if state, ok := g.selectState(c, cfg.Blocks.MiddleLayerProvider, pointInside, rng, minY, maxY); ok && g.setGeodeState(c, pointInside, state, cfg.Blocks.CannotReplace, chunkX, chunkZ, minY, maxY) {
 						placedAny = true
 					}
-				case distSumShell >= outerCrust:
+				default:
 					if state, ok := g.selectState(c, cfg.Blocks.OuterLayerProvider, pointInside, rng, minY, maxY); ok && g.setGeodeState(c, pointInside, state, cfg.Blocks.CannotReplace, chunkX, chunkZ, minY, maxY) {
 						placedAny = true
 					}
@@ -1203,8 +1280,8 @@ func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfi
 			props["minecraft:block_face"] = face.String()
 			if g.setGeodeState(c, placePos, gen.BlockState{Name: state.Name, Properties: props}, cfg.Blocks.CannotReplace, chunkX, chunkZ, minY, maxY) {
 				placedAny = true
-				break
 			}
+			break
 		}
 	}
 	return placedAny
@@ -1328,11 +1405,6 @@ func posDistSquared(a, b cube.Pos) float64 {
 	dy := float64(a[1] - b[1])
 	dz := float64(a[2] - b[2])
 	return dx*dx + dy*dy + dz*dz
-}
-
-func (g Generator) geodeNoiseValue(pos cube.Pos) float64 {
-	v := math.Sin(float64(pos[0])*12.9898 + float64(pos[1])*78.233 + float64(pos[2])*37.719 + float64(g.seed&0xffff))
-	return v - math.Floor(v)
 }
 
 func (g Generator) placeLargeDripstoneColumn(c *chunk.Chunk, root cube.Pos, pointingUp bool, radius int, bluntness, scale float64, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
@@ -1840,6 +1912,10 @@ func (g Generator) executeHugeRedMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.
 	return g.executeHugeMushroom(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng, true)
 }
 
+// executeMonsterRoom ports MonsterRoomFeature.place exactly: the validation
+// scan, the carve/wall pass (nextInt(4) per solid floor block), the two chest
+// attempts (three tries each, loot-table nextLong on placement) and the
+// spawner with its entity-id nextInt(4).
 func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	xr := int(rng.NextInt(2)) + 2
 	zr := int(rng.NextInt(2)) + 2
@@ -1847,25 +1923,35 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 	minZ, maxZRoom := -zr-1, zr+1
 	holeCount := 0
 
+	solidAt := func(p cube.Pos) bool {
+		if !g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) {
+			// Outside the world/region vanilla reads void air: not solid.
+			return false
+		}
+		return g.javaSolidAt(c, p)
+	}
+	emptyAt := func(p cube.Pos) bool {
+		if !g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) {
+			return false
+		}
+		name := g.blockNameAt(c, p)
+		return name == "air" || name == "cave_air"
+	}
+
 	for dx := minX; dx <= maxXRoom; dx++ {
 		for dy := -1; dy <= 4; dy++ {
 			for dz := minZ; dz <= maxZRoom; dz++ {
 				cursor := pos.Add(cube.Pos{dx, dy, dz})
-				if !g.positionInFeatureScope(cursor, chunkX, chunkZ, minY, maxY) {
-					return false
-				}
-				solid := g.isSolidRID(g.runtimeIDAt(c, cursor))
+				solid := solidAt(cursor)
 				if dy == -1 && !solid {
 					return false
 				}
 				if dy == 4 && !solid {
 					return false
 				}
-				if (dx == minX || dx == maxXRoom || dz == minZ || dz == maxZRoom) && dy == 0 {
-					above := cursor.Side(cube.FaceUp)
-					if g.blockNameAt(c, cursor) == "air" && g.positionInFeatureScope(above, chunkX, chunkZ, minY, maxY) && g.blockNameAt(c, above) == "air" {
-						holeCount++
-					}
+				if (dx == minX || dx == maxXRoom || dz == minZ || dz == maxZRoom) && dy == 0 &&
+					emptyAt(cursor) && emptyAt(cursor.Side(cube.FaceUp)) {
+					holeCount++
 				}
 			}
 		}
@@ -1875,6 +1961,9 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 	}
 
 	protected := func(p cube.Pos) bool {
+		if !g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) {
+			return true
+		}
 		return g.matchesFeatureBlockTag(g.blockNameAt(c, p), "features_cannot_replace")
 	}
 
@@ -1882,24 +1971,29 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 		for dy := 3; dy >= -1; dy-- {
 			for dz := minZ; dz <= maxZRoom; dz++ {
 				cursor := pos.Add(cube.Pos{dx, dy, dz})
-				name := g.blockNameAt(c, cursor)
+				inScope := g.positionInFeatureScope(cursor, chunkX, chunkZ, minY, maxY)
+				name := ""
+				if inScope {
+					name = g.blockNameAt(c, cursor)
+				}
 				if dx == minX || dy == -1 || dz == minZ || dx == maxXRoom || dy == 4 || dz == maxZRoom {
-					below := cursor.Side(cube.FaceDown)
-					if cursor[1] >= minY && g.positionInFeatureScope(below, chunkX, chunkZ, minY, maxY) && !g.isSolidRID(g.runtimeIDAt(c, below)) {
-						if !protected(cursor) {
+					if cursor[1] >= minY && !solidAt(cursor.Side(cube.FaceDown)) {
+						// Vanilla uses a direct setBlock here (no
+						// cannot-replace predicate).
+						if inScope {
 							_ = g.setBlockStateDirect(c, cursor, gen.BlockState{Name: "air"})
 						}
-					} else if g.isSolidRID(g.runtimeIDAt(c, cursor)) && name != "chest" {
-						if protected(cursor) {
-							continue
-						}
+					} else if inScope && g.javaSolidName(name) && name != "chest" {
+						// nextInt(4) is consumed before the predicate check.
 						if dy == -1 && rng.NextInt(4) != 0 {
-							_ = g.setBlockStateDirect(c, cursor, gen.BlockState{Name: "mossy_cobblestone"})
-						} else {
+							if !protected(cursor) {
+								_ = g.setBlockStateDirect(c, cursor, gen.BlockState{Name: "mossy_cobblestone"})
+							}
+						} else if !protected(cursor) {
 							_ = g.setBlockStateDirect(c, cursor, gen.BlockState{Name: "cobblestone"})
 						}
 					}
-				} else if name != "chest" && name != "mob_spawner" && !protected(cursor) {
+				} else if inScope && name != "chest" && name != "mob_spawner" && !protected(cursor) {
 					_ = g.setBlockStateDirect(c, cursor, gen.BlockState{Name: "air"})
 				}
 			}
@@ -1911,18 +2005,22 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 			xc := pos[0] + int(rng.NextInt(uint32(xr*2+1))) - xr
 			zc := pos[2] + int(rng.NextInt(uint32(zr*2+1))) - zr
 			chestPos := cube.Pos{xc, pos[1], zc}
-			if !g.positionInFeatureScope(chestPos, chunkX, chunkZ, minY, maxY) || g.blockNameAt(c, chestPos) != "air" {
+			if !emptyAt(chestPos) {
 				continue
 			}
 			wallCount := 0
-			for _, dir := range []cube.Pos{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}} {
-				side := chestPos.Add(dir)
-				if g.positionInFeatureScope(side, chunkX, chunkZ, minY, maxY) && g.isSolidRID(g.runtimeIDAt(c, side)) {
+			for _, dir := range []cube.Pos{{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}} {
+				if solidAt(chestPos.Add(dir)) {
 					wallCount++
 				}
 			}
 			if wallCount == 1 {
-				_ = g.setFeatureBlock(c, chestPos, block.NewChest())
+				if !protected(chestPos) {
+					_ = g.setFeatureBlock(c, chestPos, block.NewChest())
+				}
+				// RandomizableContainer.setBlockEntityLootTable consumes the
+				// loot seed regardless of whether the chest was placed.
+				_ = rng.NextLong()
 				break
 			}
 		}
@@ -1930,6 +2028,8 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 
 	if !protected(pos) {
 		_ = g.setBlockStateDirect(c, pos, gen.BlockState{Name: "mob_spawner"})
+		// randomEntityId: Util.getRandom over the 4-entry mob table.
+		_ = rng.NextInt(4)
 	}
 	return true
 }
@@ -3806,6 +3906,39 @@ func (g Generator) placeFeatureState(c *chunk.Chunk, pos cube.Pos, state gen.Blo
 	return true
 }
 
+// javaSolidName approximates Java BlockStateBase.isSolid (legacy material
+// solidity) for block names that can exist while decoration features run:
+// everything is solid except air, fluids and the known non-solid decoration /
+// structure blocks below.
+func (g Generator) javaSolidName(name string) bool {
+	switch name {
+	case "air", "cave_air", "void_air", "water", "lava", "flowing_water", "flowing_lava",
+		"web", "cobweb", "rail", "golden_rail", "detector_rail", "activator_rail",
+		"torch", "wall_torch", "soul_torch", "redstone_torch", "underwater_torch",
+		"small_amethyst_bud", "medium_amethyst_bud", "large_amethyst_bud", "amethyst_cluster",
+		"glow_lichen", "sculk_vein", "pointed_dripstone", "ladder", "vine", "cave_vines",
+		"cave_vines_plant", "cave_vines_body_with_berries", "cave_vines_head_with_berries",
+		"spore_blossom", "hanging_roots", "big_dripleaf", "small_dripleaf", "moss_carpet",
+		"pale_moss_carpet", "snow_layer", "seagrass", "tall_seagrass", "kelp", "kelp_plant",
+		"sea_pickle", "bamboo", "sugar_cane", "reeds", "brown_mushroom", "red_mushroom",
+		"short_grass", "tall_grass", "fern", "large_fern", "dead_bush", "sapling",
+		"fire", "soul_fire", "lever", "redstone_wire", "tripwire", "tripwire_hook", "frame":
+		return false
+	default:
+		return true
+	}
+}
+
+func (g Generator) javaSolidAt(c *chunk.Chunk, pos cube.Pos) bool {
+	return g.javaSolidName(g.blockNameAt(c, pos))
+}
+
+// isJavaWaterName reports whether the block is Java's Blocks.WATER, which
+// covers both source and flowing states (Bedrock splits them in two blocks).
+func (g Generator) isJavaWaterName(name string) bool {
+	return name == "water" || name == "flowing_water"
+}
+
 func (g Generator) positionInFeatureScope(pos cube.Pos, chunkX, chunkZ, minY, maxY int) bool {
 	if g.activeTreeRegion != nil {
 		return g.activeTreeRegion.contains(pos)
@@ -3842,6 +3975,18 @@ func (g Generator) featureBlockFromState(state gen.BlockState, rng *gen.Worldgen
 		return block.Cactus{Age: parseStateInt(state.Properties, "age")}, true
 	case "kelp":
 		return block.Kelp{Age: parseStateInt(state.Properties, "age")}, true
+	case "kelp_plant":
+		// Bedrock has no separate kelp body block; age 25 is reserved as the
+		// kelp_plant marker (worldgen heads always use ages 20-23).
+		return block.Kelp{Age: 25}, true
+	case "seagrass":
+		return world.BlockByName("minecraft:seagrass", map[string]any{"sea_grass_type": "default"})
+	case "tall_seagrass":
+		seagrassType := "double_bot"
+		if state.Properties["half"] == "upper" {
+			seagrassType = "double_top"
+		}
+		return world.BlockByName("minecraft:seagrass", map[string]any{"sea_grass_type": seagrassType})
 	case "water":
 		return block.Water{Depth: 8, Falling: state.Properties["falling"] == "true"}, true
 	case "lava":
@@ -4077,6 +4222,11 @@ func normalizeFeatureState(state gen.BlockState) gen.BlockState {
 	if state.Name == "podzol" {
 		delete(props, "snowy")
 	}
+	if state.Name == "redstone_ore" || state.Name == "deepslate_redstone_ore" {
+		// Bedrock models the lit variant as a separate block; worldgen only
+		// ever places lit=false.
+		delete(props, "lit")
+	}
 
 	if len(props) == 0 {
 		state.Properties = nil
@@ -4116,6 +4266,9 @@ func featureStateNeedsPropertyNormalization(name string, properties map[string]s
 		return ok
 	case name == "podzol":
 		_, ok := properties["snowy"]
+		return ok
+	case name == "redstone_ore", name == "deepslate_redstone_ore":
+		_, ok := properties["lit"]
 		return ok
 	default:
 		return false
@@ -4157,9 +4310,20 @@ func featureBlockName(b world.Block) string {
 	switch b := b.(type) {
 	case block.Grass:
 		return "grass"
+	case block.Kelp:
+		if b.Age >= 25 {
+			return "kelp_plant"
+		}
+		return "kelp"
 	default:
-		name, _ := b.EncodeBlock()
-		return strings.TrimPrefix(name, "minecraft:")
+		name, props := b.EncodeBlock()
+		name = strings.TrimPrefix(name, "minecraft:")
+		if name == "seagrass" {
+			if seagrassType, _ := props["sea_grass_type"].(string); seagrassType == "double_top" || seagrassType == "double_bot" {
+				return "tall_seagrass"
+			}
+		}
+		return name
 	}
 }
 
@@ -4746,33 +4910,97 @@ func (g Generator) columnHeightmapY(c *chunk.Chunk, localX, localZ int, kind str
 	case "WORLD_SURFACE_WG", "WORLD_SURFACE":
 		return min(topY+1, maxY)
 	case "MOTION_BLOCKING":
-		for y := topY; y >= minY; y-- {
-			if rid := g.columnScanRuntimeID(c, localX, y, localZ); g.isMotionBlockingRID(rid, false) {
-				return min(y+1, maxY)
-			}
+		if y, ok := g.columnScanDown(c, localX, localZ, topY, minY, func(rid uint32) bool {
+			return g.isMotionBlockingRID(rid, false)
+		}); ok {
+			return min(y+1, maxY)
 		}
 		return minY
 	case "MOTION_BLOCKING_NO_LEAVES":
-		for y := topY; y >= minY; y-- {
-			if rid := g.columnScanRuntimeID(c, localX, y, localZ); g.isMotionBlockingRID(rid, true) {
-				return min(y+1, maxY)
-			}
+		if y, ok := g.columnScanDown(c, localX, localZ, topY, minY, func(rid uint32) bool {
+			return g.isMotionBlockingRID(rid, true)
+		}); ok {
+			return min(y+1, maxY)
 		}
 		return minY
 	case "OCEAN_FLOOR", "OCEAN_FLOOR_WG":
-		for y := topY; y >= minY; y-- {
-			rid := g.columnScanRuntimeID(c, localX, y, localZ)
+		// Java's OCEAN_FLOOR predicate is blocksMotion: skip fluids plus
+		// kelp, seagrass and other non-colliding decoration blocks.
+		if y, ok := g.columnScanDown(c, localX, localZ, topY, minY, func(rid uint32) bool {
 			if rid == g.airRID || rid == g.waterRID || rid == g.lavaRID {
-				continue
+				return false
 			}
-			if g.isSolidRID(rid) {
-				return min(y+1, maxY)
-			}
+			return g.isSolidRID(rid) && g.javaSolidName(g.carverBlockName(rid))
+		}); ok {
+			return min(y+1, maxY)
 		}
 		return minY
 	default:
 		return min(topY+1, maxY)
 	}
+}
+
+// columnScanDown finds the highest y in [minY, topY] whose column block (layer
+// 0, falling back to layer 1 for air) satisfies pred. It walks subchunks
+// top-down and skips whole subchunks whose palettes cannot contain a matching
+// block, which keeps deep-water column scans cheap.
+func (g Generator) columnScanDown(c *chunk.Chunk, localX, localZ, topY, minY int, pred func(rid uint32) bool) (int, bool) {
+	if topY < minY {
+		return 0, false
+	}
+	subs := c.Sub()
+	rangeMin := c.Range().Min()
+	x, z := uint8(localX), uint8(localZ)
+	y := topY
+	for y >= minY {
+		subIdx := (y - rangeMin) >> 4
+		if subIdx < 0 || subIdx >= len(subs) {
+			return 0, false
+		}
+		subBottom := rangeMin + subIdx*16
+		sub := subs[subIdx]
+		if sub.Empty() {
+			// Only air in both layers.
+			if pred(g.airRID) {
+				return y, true
+			}
+			y = subBottom - 1
+			continue
+		}
+		layers := sub.Layers()
+		if !subChunkPalettesMayMatch(layers, g.airRID, pred) {
+			y = subBottom - 1
+			continue
+		}
+		bottom := max(minY, subBottom)
+		for ; y >= bottom; y-- {
+			rid := layers[0].At(x, uint8(y), z)
+			if rid == g.airRID && len(layers) > 1 {
+				rid = layers[1].At(x, uint8(y), z)
+			}
+			if pred(rid) {
+				return y, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// subChunkPalettesMayMatch reports whether any palette entry in any layer of
+// the subchunk could satisfy pred; if none can, the subchunk is skippable.
+func subChunkPalettesMayMatch(layers []*chunk.PalettedStorage, airRID uint32, pred func(rid uint32) bool) bool {
+	if len(layers) == 0 {
+		return pred(airRID)
+	}
+	for _, storage := range layers {
+		palette := storage.Palette()
+		for i := 0; i < palette.Len(); i++ {
+			if pred(palette.Value(uint16(i))) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (g Generator) columnScanRuntimeID(c *chunk.Chunk, localX, y, localZ int) uint32 {
@@ -5030,9 +5258,9 @@ func (g Generator) matchOreTarget(blockName string, targets []gen.OreTargetConfi
 func (g Generator) matchesOreTag(blockName, tag string) bool {
 	switch tag {
 	case "stone_ore_replaceables":
-		return slices.Contains([]string{"stone", "granite", "diorite", "andesite", "tuff"}, blockName)
+		return slices.Contains([]string{"stone", "granite", "diorite", "andesite"}, blockName)
 	case "deepslate_ore_replaceables":
-		return blockName == "deepslate"
+		return blockName == "deepslate" || blockName == "tuff"
 	case "base_stone_overworld":
 		return slices.Contains([]string{"stone", "granite", "diorite", "andesite", "tuff", "deepslate"}, blockName)
 	case "base_stone_nether":

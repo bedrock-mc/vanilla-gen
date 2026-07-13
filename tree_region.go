@@ -42,6 +42,19 @@ type treeDecorationRegion struct {
 	maxY         int
 	centerChunk  *chunk.Chunk
 	slots        map[[2]int]treeDecorationRegionSlot
+
+	// oreProbeFloor memoizes OCEAN_FLOOR heightmap probes for OreFeature's
+	// placement pre-check, keyed by the replayed chunk position and clamped
+	// local column. Ore features only ever replace motion-blocking blocks
+	// with motion-blocking blocks, so values cannot change while ore
+	// features run; the memo is dropped as soon as any other feature type
+	// executes.
+	oreProbeFloor map[oreProbeKey]int
+}
+
+type oreProbeKey struct {
+	chunkX, chunkZ int
+	localX, localZ int8
 }
 
 type treeDecorationRegionSlot struct {
@@ -142,11 +155,30 @@ func (g Generator) chunkForActiveTreePos(c *chunk.Chunk, pos cube.Pos) *chunk.Ch
 }
 
 func (g Generator) runPlacedFeatureAcrossRegion(region *treeDecorationRegion, step gen.GenerationStep, featureName string, featureIndex int) {
+	// Any non-ore feature may alter column heights, so drop the ore probe
+	// heightmap memo (see treeDecorationRegion.oreProbeFloor).
+	if region.oreProbeFloor != nil && !g.placedFeatureIsOre(featureName) {
+		region.oreProbeFloor = nil
+	}
 	if g.placedFeatureNeedsReplayAcrossRegion(featureName) {
 		g.runPlacedTreeFeatureAcrossRegion(region, step, featureName, featureIndex)
 		return
 	}
 	g.runPlacedFeatureWithRegion(region, step, featureName, featureIndex)
+}
+
+// placedFeatureIsOre reports whether the placed feature's configured feature
+// is a plain ore/scattered_ore, which never changes any heightmap.
+func (g Generator) placedFeatureIsOre(featureName string) bool {
+	placed, err := g.features.Placed(featureName)
+	if err != nil {
+		return false
+	}
+	feature, err := g.features.ResolveConfigured(placed.Feature)
+	if err != nil {
+		return false
+	}
+	return feature.Type == "ore" || feature.Type == "scattered_ore"
 }
 
 func (g Generator) runPlacedFeatureWithRegion(region *treeDecorationRegion, step gen.GenerationStep, featureName string, featureIndex int) {
@@ -394,6 +426,10 @@ func (g Generator) configuredFeatureDecorationMargin(ref gen.ConfiguredFeatureRe
 		return 11
 	case "monster_room":
 		return 4
+	case "seagrass":
+		// SeagrassFeature offsets the column by nextInt(8)-nextInt(8) on
+		// both axes before resolving the ocean-floor heightmap.
+		return 8
 	case "ore":
 		cfg, err := feature.Ore()
 		if err != nil {
@@ -544,7 +580,7 @@ func (g Generator) configuredFeatureRefNeedsDecorationRegion(ref gen.ConfiguredF
 	}
 
 	switch feature.Type {
-	case "tree", "geode", "fossil", "monster_room", "desert_well", "iceberg", "blue_ice", "ore", "scattered_ore", "disk":
+	case "tree", "geode", "fossil", "monster_room", "desert_well", "iceberg", "blue_ice", "ore", "scattered_ore", "disk", "seagrass":
 		return true
 	case "random_selector":
 		cfg, err := feature.RandomSelector()

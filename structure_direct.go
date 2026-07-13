@@ -30,7 +30,9 @@ func estimateDirectStructureBackreach(structureName, structureType string) (int,
 	case "fortress":
 		return 3, 3
 	case "mineshaft":
-		return 3, 3
+		// Mineshaft piece networks sprawl >48 blocks from the start chunk;
+		// vanilla's structure reference step scans an 8-chunk radius.
+		return 8, 8
 	case "ocean_monument":
 		return 4, 4
 	case "woodland_mansion":

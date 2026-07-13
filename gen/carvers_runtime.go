@@ -56,6 +56,8 @@ func (r *CarverRegistry) Configured(name string) (ConfiguredCarverDef, error) {
 type ConfiguredCarverDef struct {
 	Type   string
 	Config json.RawMessage
+
+	decoded *typedJSONCache
 }
 
 func (f *ConfiguredCarverDef) UnmarshalJSON(data []byte) error {
@@ -68,6 +70,7 @@ func (f *ConfiguredCarverDef) UnmarshalJSON(data []byte) error {
 	}
 	f.Type = normalizeIdentifier(raw.Type)
 	f.Config = append(json.RawMessage(nil), raw.Config...)
+	f.decoded = newTypedJSONCache()
 	return nil
 }
 
@@ -183,6 +186,9 @@ func decodeCarverConfig[T any](f ConfiguredCarverDef, expectedTypes ...string) (
 	var out T
 	for _, expectedType := range expectedTypes {
 		if f.Type == expectedType {
+			if f.decoded != nil {
+				return decodeCachedJSON[T](f.decoded, f.Type, f.Config)
+			}
 			if err := json.Unmarshal(f.Config, &out); err != nil {
 				return out, err
 			}

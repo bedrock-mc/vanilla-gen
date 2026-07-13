@@ -35,6 +35,16 @@ func main() {
 
 	srv := conf.New()
 	srv.CloseOnProgramEnd()
+
+	// The world provider's saved spawn defaults to the origin, which on many
+	// seeds (including seed 1) is deep ocean. Move it to the nearest land
+	// like vanilla does. Delete the world/ directory when changing seeds so
+	// a stale spawn is not restored from disk.
+	g := vanilla.NewForDimension(*seed, world.Overworld)
+	spawn := g.DefaultSpawn(world.Overworld)
+	srv.World().SetSpawn(spawn)
+	fmt.Printf("spawn set to %v\n", spawn)
+
 	fmt.Printf("listening on :19132, seed %d\n", *seed)
 	srv.Listen()
 	for range srv.Accept() {

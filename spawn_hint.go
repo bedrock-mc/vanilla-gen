@@ -69,7 +69,8 @@ func spawnHintBiomeScore(biome gen.Biome) int {
 }
 
 // DefaultSpawn implements world.Generator: a visible land spawn near the
-// origin, at the preliminary surface height of the chosen chunk center.
+// origin, one block above the final-density world surface of the chosen
+// chunk center.
 func (g Generator) DefaultSpawn(world.Dimension) cube.Pos {
 	chunkPos, ok := g.FindSpawnChunk(32)
 	if !ok {
@@ -77,12 +78,12 @@ func (g Generator) DefaultSpawn(world.Dimension) cube.Pos {
 	}
 	x := int(chunkPos[0])*16 + 8
 	z := int(chunkPos[1])*16 + 8
-	y := g.metadata.SeaLevel + 16
-	if root := g.rootIndex("preliminary_surface_level"); root >= 0 {
-		ctx := gen.FunctionContext{BlockX: x, BlockY: 0, BlockZ: z}
-		if v := g.graph.Eval(root, ctx, g.noises, nil, nil, nil); !math.IsNaN(v) {
-			y = clamp(int(math.Floor(v))+2, g.metadata.MinY+1, g.metadata.MinY+g.metadata.Height-2)
-		}
+	minY := g.metadata.MinY
+	maxY := g.metadata.MinY + g.metadata.Height - 1
+	y := g.worldSurfaceLevelAt(x, z, minY, maxY) + 1
+	if y <= g.metadata.SeaLevel {
+		y = g.metadata.SeaLevel + 1
 	}
+	y = clamp(y, minY+1, maxY-2)
 	return cube.Pos{x, y, z}
 }
