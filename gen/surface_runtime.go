@@ -19,9 +19,12 @@ type SurfaceContext struct {
 	StoneDepthBelow  int
 	Steep            bool
 	Biome            Biome
-	MinSurfaceLevel  int
-	MinY             int
-	MaxY             int
+	// BiomeFunc lazily resolves the zoomed biome like vanilla's memoized
+	// Context.biome supplier; when set it takes precedence over Biome.
+	BiomeFunc       func() Biome
+	MinSurfaceLevel int
+	MinY            int
+	MaxY            int
 }
 
 type SurfaceRuntime struct {
@@ -253,8 +256,12 @@ func (s *SurfaceRuntime) evalCondition(condition *surfaceCondition, ctx SurfaceC
 	}
 	switch condition.kind {
 	case surfaceConditionBiome:
+		ctxBiome := ctx.Biome
+		if ctx.BiomeFunc != nil {
+			ctxBiome = ctx.BiomeFunc()
+		}
 		for _, biome := range condition.biomes {
-			if biome == ctx.Biome {
+			if biome == ctxBiome {
 				return true
 			}
 		}
@@ -319,7 +326,11 @@ func (s *SurfaceRuntime) evalCondition(condition *surfaceCondition, ctx SurfaceC
 		return ctx.BlockY >= ctx.MinSurfaceLevel
 	case surfaceConditionTemperature:
 		// Mirrors TemperatureHelperCondition: Biome.coldEnoughToSnow.
-		return BiomeColdEnoughToSnow(ctx.Biome, ctx.BlockX, ctx.BlockY, ctx.BlockZ, s.seaLevel)
+		tempBiome := ctx.Biome
+		if ctx.BiomeFunc != nil {
+			tempBiome = ctx.BiomeFunc()
+		}
+		return BiomeColdEnoughToSnow(tempBiome, ctx.BlockX, ctx.BlockY, ctx.BlockZ, s.seaLevel)
 	case surfaceConditionNot:
 		return !s.evalCondition(condition.inner, ctx)
 	default:

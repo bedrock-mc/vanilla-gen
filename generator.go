@@ -51,6 +51,8 @@ type Generator struct {
 	templateBlockCache *stringRIDCache
 	blockNameCache     *runtimeIDNameCache
 	featureNoiseCache  *doublePerlinNoiseCache
+	protoChunks        *protoChunkCache
+	prelimLevels       *xzIntCache
 	finalDensityScalar gen.DensityScalarEvaluator
 	finalDensityVector gen.DensityVectorEvaluator
 	airRID             uint32
@@ -119,6 +121,8 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 		templateBlockCache: newStringRIDCache(),
 		blockNameCache:     newRuntimeIDNameCache(),
 		featureNoiseCache:  newDoublePerlinNoiseCache(),
+		protoChunks:        newProtoChunkCache(320),
+		prelimLevels:       newXZIntCache(),
 		finalDensityScalar: scalar,
 		finalDensityVector: vector,
 		airRID:             runtimeIDForBlock(block.Air{}),
@@ -169,6 +173,34 @@ func (g Generator) prepareChunkForDecoration(pos world.ChunkPos, c *chunk.Chunk)
 	chunkZ := int(pos[1])
 	minY := c.Range().Min()
 	maxY := c.Range().Max()
+
+	// The pre-decoration state of a chunk is deterministic and needed by every
+	// neighbouring chunk's region replay, so it is cached and copied.
+	if g.protoChunks != nil {
+		if cached, biomes, ok := g.protoChunks.get(chunkX, chunkZ); ok {
+			copyChunkInto(c, cached, minY, maxY)
+			return biomes, chunkX, chunkZ, minY, maxY
+		}
+	}
+	biomes := g.prepareChunkUncached(c, chunkX, chunkZ, minY, maxY)
+	if g.protoChunks != nil {
+		g.protoChunks.store(chunkX, chunkZ, c, biomes)
+	}
+	return biomes, chunkX, chunkZ, minY, maxY
+}
+
+func copyChunkInto(dst, src *chunk.Chunk, minY, maxY int) {
+	for x := uint8(0); x < 16; x++ {
+		for z := uint8(0); z < 16; z++ {
+			for y := minY; y <= maxY; y++ {
+				dst.SetBlock(x, int16(y), z, 0, src.Block(x, int16(y), z, 0))
+				dst.SetBiome(x, int16(y), z, src.Biome(x, int16(y), z))
+			}
+		}
+	}
+}
+
+func (g Generator) prepareChunkUncached(c *chunk.Chunk, chunkX, chunkZ, minY, maxY int) sourceBiomeVolume {
 	flat := g.graph.NewFlatCacheGrid(chunkX, chunkZ, g.noises)
 	finalDensityRoot := g.rootIndex("final_density")
 	densityScalar := g.finalDensityScalar
@@ -250,7 +282,7 @@ func (g Generator) prepareChunkForDecoration(pos world.ChunkPos, c *chunk.Chunk)
 	g.applySurfaceAndBiomes(c, biomes, chunkX, chunkZ, minY, maxY)
 	g.carveTerrain(c, biomes, chunkX, chunkZ, minY, maxY, aquifer)
 	g.decorateEndMainIsland(c, chunkX, chunkZ, minY, maxY)
-	return biomes, chunkX, chunkZ, minY, maxY
+	return biomes
 }
 
 // ConcurrentChunkGeneration returns true because Generator guards its shared

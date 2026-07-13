@@ -5,8 +5,79 @@ package gen
 import (
 	"fmt"
 	"math"
+	"os"
 	"testing"
 )
+
+// TestDebugAquiferProbeParity diffs ComputeSubstance(ctx, 0.0) for every block
+// in chunks [-2,2)x[-2,2), y in [-64,100], against the vanilla dump produced by
+// driver/AquiferProbe.java.
+func TestDebugAquiferProbeParity(t *testing.T) {
+	path := os.Getenv("AQUIFER_PROBE_FIXTURE")
+	if path == "" {
+		t.Skip("AQUIFER_PROBE_FIXTURE not set")
+	}
+	density := 0.0
+	if d := os.Getenv("AQUIFER_PROBE_DENSITY"); d != "" {
+		fmt.Sscanf(d, "%f", &density)
+	}
+	realDensity := os.Getenv("AQUIFER_PROBE_REAL_DENSITY") != ""
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := make([]string, 0, 4096)
+	start := 0
+	for i, b := range data {
+		if b == '\n' {
+			lines = append(lines, string(data[start:i]))
+			start = i + 1
+		}
+	}
+
+	chunkRange := 2
+	yMax := 100
+	if os.Getenv("AQUIFER_PROBE_BIG") != "" {
+		chunkRange = 8
+		yMax = 319
+	}
+	seed := int64(1)
+	noises := NewNoiseRegistry(seed)
+	idx := 0
+	total := 0
+	mismatches := 0
+	classes := map[string]int{}
+	for cx := -chunkRange; cx < chunkRange; cx++ {
+		for cz := -chunkRange; cz < chunkRange; cz++ {
+			flat := OverworldGraph.NewFlatCacheGrid(cx, cz, noises)
+			a := NewNoiseBasedAquifer(OverworldGraph, cx, cz, -64, 319, noises, flat, seed, OverworldFluidPicker{SeaLevel: 63})
+			for lx := 0; lx < 16; lx++ {
+				for lz := 0; lz < 16; lz++ {
+					line := lines[idx]
+					idx++
+					for y := -64; y <= yMax; y++ {
+						total++
+						want := line[y+64]
+						ctx := FunctionContext{BlockX: cx*16 + lx, BlockY: y, BlockZ: cz*16 + lz}
+						d := density
+						if realDensity {
+							d = OverworldGraph.Eval(OverworldRootFinalDensity, ctx, noises, nil, nil, nil)
+						}
+						got := byte('0') + byte(a.ComputeSubstance(ctx, d))
+						if got != want {
+							mismatches++
+							classes[fmt.Sprintf("%c->%c", want, got)]++
+							if mismatches <= 20 {
+								t.Logf("aquifer diff at (%d,%d,%d): java %c, go %c", cx*16+lx, y, cz*16+lz, want, got)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	t.Logf("aquifer probe mismatches: %d / %d, classes %v", mismatches, total, classes)
+}
 
 func TestDebugAquiferInternals(t *testing.T) {
 	seed := int64(1)

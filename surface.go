@@ -83,6 +83,9 @@ func (g Generator) applySurfaceAndBiomes(c *chunk.Chunk, biomes sourceBiomeVolum
 					continue
 				}
 
+				blockY := y
+				biomeKnown := false
+				var biomeCached gen.Biome
 				ctx := gen.SurfaceContext{
 					BlockX:           blockX,
 					BlockY:           y,
@@ -93,10 +96,16 @@ func (g Generator) applySurfaceAndBiomes(c *chunk.Chunk, biomes sourceBiomeVolum
 					StoneDepthAbove:  stoneAboveDepth,
 					StoneDepthBelow:  stoneBelowDepth,
 					Steep:            steep,
-					Biome:            g.zoomedBiomeAt(blockX, y, blockZ),
-					MinSurfaceLevel:  minSurfaceLevel,
-					MinY:             minY,
-					MaxY:             maxY,
+					BiomeFunc: func() gen.Biome {
+						if !biomeKnown {
+							biomeCached = g.zoomedBiomeAt(blockX, blockY, blockZ)
+							biomeKnown = true
+						}
+						return biomeCached
+					},
+					MinSurfaceLevel: minSurfaceLevel,
+					MinY:            minY,
+					MaxY:            maxY,
 				}
 				if replacement, ok := g.surface.TryApply(ctx, g.lookupSurfaceBlock); ok && replacement != rid {
 					c.SetBlock(uint8(x), int16(y), uint8(z), 0, replacement)
@@ -139,22 +148,33 @@ func steepColumn(heights *[16][16]int, x, z int) bool {
 // function at the four 16-aligned corners like NoiseChunk.preliminarySurfaceLevel.
 func (g Generator) preliminarySurfaceCorners(chunkX, chunkZ int) [4]int {
 	var corners [4]int
-	root := g.rootIndex("preliminary_surface_level")
-	if root < 0 {
-		for i := range corners {
-			corners[i] = g.metadata.MinY + g.metadata.Height
-		}
-		return corners
-	}
 	offsets := [4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
 	for i, off := range offsets {
-		blockX := (chunkX + off[0]) * 16
-		blockZ := (chunkZ + off[1]) * 16
-		ctx := gen.FunctionContext{BlockX: blockX, BlockY: 0, BlockZ: blockZ}
-		value := g.graph.Eval(root, ctx, g.noises, nil, nil, nil)
-		corners[i] = int(math.Floor(value))
+		corners[i] = g.cachedPreliminarySurfaceLevel((chunkX+off[0])*16, (chunkZ+off[1])*16)
 	}
 	return corners
+}
+
+// preliminarySurfaceLevelAt memoizes floor(preliminary_surface_level(x, z));
+// the corners are 16-aligned so the quart-snapping flat cache is exact.
+func (g Generator) cachedPreliminarySurfaceLevel(blockX, blockZ int) int {
+	if v, ok := g.prelimLevels.lookup(blockX, blockZ); ok {
+		return v
+	}
+	ctx := gen.FunctionContext{BlockX: blockX, BlockY: 0, BlockZ: blockZ}
+	var value float64
+	if g.dimension == world.Overworld {
+		flat := g.graph.NewFlatCacheGrid(blockX>>4, blockZ>>4, g.noises)
+		col := g.graph.NewColumnContext(blockX, blockZ, g.noises, flat)
+		value = gen.ComputePreliminarySurfaceLevel(ctx, g.noises, flat, col)
+	} else if root := g.rootIndex("preliminary_surface_level"); root >= 0 {
+		value = g.graph.Eval(root, ctx, g.noises, nil, nil, nil)
+	} else {
+		return g.metadata.MinY + g.metadata.Height
+	}
+	v := int(math.Floor(value))
+	g.prelimLevels.store(blockX, blockZ, v)
+	return v
 }
 
 // minSurfaceLevel mirrors SurfaceRules.Context.getMinSurfaceLevel.
