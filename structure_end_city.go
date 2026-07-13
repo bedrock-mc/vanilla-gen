@@ -15,7 +15,7 @@ type endCityState struct {
 	shipCreated bool
 }
 
-type endCitySectionGenerator func(g Generator, genDepth int, parent plannedStructurePiece, offset cube.Pos, pieces *[]plannedStructurePiece, rng *gen.Xoroshiro128) bool
+type endCitySectionGenerator func(g Generator, genDepth int, parent plannedStructurePiece, offset cube.Pos, pieces *[]plannedStructurePiece, rng *gen.WorldgenRandom) bool
 
 var (
 	endCityTowerBridges = []endCityBridgeAttachment{
@@ -32,7 +32,7 @@ var (
 	}
 )
 
-func (g Generator) buildEndCityStructure(startChunk world.ChunkPos, _, _ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildEndCityStructure(startChunk world.ChunkPos, _, _ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	rotation := randomStructureRotation(rng)
 	startPos, ok := g.endCityStartPos(startChunk, rotation, surfaceSampler)
 	if !ok {
@@ -133,7 +133,7 @@ func (g Generator) addEndCityPiece(parent plannedStructurePiece, offset cube.Pos
 	return g.newEndCityRootPiece(templateName, origin, rotation, overwrite)
 }
 
-func (g Generator) endCityRecursiveChildren(generator endCitySectionGenerator, genDepth int, parent plannedStructurePiece, offset cube.Pos, pieces *[]plannedStructurePiece, rng *gen.Xoroshiro128) bool {
+func (g Generator) endCityRecursiveChildren(generator endCitySectionGenerator, genDepth int, parent plannedStructurePiece, offset cube.Pos, pieces *[]plannedStructurePiece, rng *gen.WorldgenRandom) bool {
 	if genDepth > 8 {
 		return false
 	}
@@ -185,7 +185,7 @@ func (g Generator) highestStructureSolidYAt(blockX, blockZ, minY, maxY int) int 
 	return minY
 }
 
-func (s *endCityState) generateHouseTower(g Generator, genDepth int, parent plannedStructurePiece, offset cube.Pos, pieces *[]plannedStructurePiece, rng *gen.Xoroshiro128) bool {
+func (s *endCityState) generateHouseTower(g Generator, genDepth int, parent plannedStructurePiece, offset cube.Pos, pieces *[]plannedStructurePiece, rng *gen.WorldgenRandom) bool {
 	rotation := parent.rotation
 	lastPiece, ok := g.addEndCityPiece(parent, offset, "base_floor", rotation, true)
 	if !ok {
@@ -233,7 +233,7 @@ func (s *endCityState) generateHouseTower(g Generator, genDepth int, parent plan
 	}
 }
 
-func (s *endCityState) generateTower(g Generator, genDepth int, parent plannedStructurePiece, _ cube.Pos, pieces *[]plannedStructurePiece, rng *gen.Xoroshiro128) bool {
+func (s *endCityState) generateTower(g Generator, genDepth int, parent plannedStructurePiece, _ cube.Pos, pieces *[]plannedStructurePiece, rng *gen.WorldgenRandom) bool {
 	rotation := parent.rotation
 	lastPiece, ok := g.addEndCityPiece(parent, cube.Pos{3 + int(rng.NextInt(2)), -3, 3 + int(rng.NextInt(2))}, "tower_base", rotation, true)
 	if !ok {
@@ -299,7 +299,7 @@ func (s *endCityState) generateTower(g Generator, genDepth int, parent plannedSt
 	return true
 }
 
-func (s *endCityState) generateTowerBridge(g Generator, genDepth int, parent plannedStructurePiece, _ cube.Pos, pieces *[]plannedStructurePiece, rng *gen.Xoroshiro128) bool {
+func (s *endCityState) generateTowerBridge(g Generator, genDepth int, parent plannedStructurePiece, _ cube.Pos, pieces *[]plannedStructurePiece, rng *gen.WorldgenRandom) bool {
 	rotation := parent.rotation
 	bridgeLength := int(rng.NextInt(4)) + 1
 	lastPiece, ok := g.addEndCityPiece(parent, cube.Pos{0, 0, -4}, "bridge_piece", rotation, true)
@@ -348,7 +348,7 @@ func (s *endCityState) generateTowerBridge(g Generator, genDepth int, parent pla
 	return true
 }
 
-func (s *endCityState) generateFatTower(g Generator, genDepth int, parent plannedStructurePiece, _ cube.Pos, pieces *[]plannedStructurePiece, rng *gen.Xoroshiro128) bool {
+func (s *endCityState) generateFatTower(g Generator, genDepth int, parent plannedStructurePiece, _ cube.Pos, pieces *[]plannedStructurePiece, rng *gen.WorldgenRandom) bool {
 	rotation := parent.rotation
 	lastPiece, ok := g.addEndCityPiece(parent, cube.Pos{-3, 4, -3}, "fat_tower_base", rotation, true)
 	if !ok {

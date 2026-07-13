@@ -357,17 +357,17 @@ func (g Generator) applyStructureRuleProcessor(
 	locState := g.structureWorldBlockState(c, chunkX, chunkZ, block.worldPos)
 	for _, rule := range processor.rules {
 		rng := newStructureSeededRNG(block.worldPos)
-		if !matchesStructureRuleTest(block.state, rule.input, &rng) {
+		if !matchesStructureRuleTest(block.state, rule.input, rng) {
 			continue
 		}
-		if !matchesStructureRuleTest(locState, rule.location, &rng) {
+		if !matchesStructureRuleTest(locState, rule.location, rng) {
 			continue
 		}
-		if !matchesStructurePosRuleTest(block.templatePos, block.worldPos, reference, rule.position, &rng) {
+		if !matchesStructurePosRuleTest(block.templatePos, block.worldPos, reference, rule.position, rng) {
 			continue
 		}
 		block.state = cloneBlockState(rule.output)
-		block.nbt = applyStructureBlockEntityModifier(rule.blockEntity, &rng, block.nbt)
+		block.nbt = applyStructureBlockEntityModifier(rule.blockEntity, rng, block.nbt)
 		return block, true
 	}
 	return block, true
@@ -406,8 +406,8 @@ func (g Generator) applyStructureCappedProcessor(
 	for i := range indices {
 		indices[i] = i
 	}
-	rng := gen.NewPositionalRandomFactory(g.seed).At(reference[0], reference[1], reference[2])
-	shuffleWithRNG(indices, &rng)
+	rng := gen.NewWorldgenRandomFromXoroshiro(gen.NewPositionalRandomFactory(g.seed).At(reference[0], reference[1], reference[2]))
+	shuffleWithRNG(indices, rng)
 
 	out := append([]structureProcessedBlock(nil), blocks...)
 	replaced := 0
@@ -439,13 +439,13 @@ func structureProcessedBlocksEqual(a, b structureProcessedBlock) bool {
 	return structureAnyMapEqual(a.nbt, b.nbt)
 }
 
-func newStructureSeededRNG(pos cube.Pos) gen.Xoroshiro128 {
+func newStructureSeededRNG(pos cube.Pos) *gen.WorldgenRandom {
 	seed := int64(pos[0])*3129871 ^ int64(pos[2])*116129781 ^ int64(pos[1])
 	seed = seed*seed*42317861 + seed*11
-	return gen.NewXoroshiro128FromSeed(seed >> 16)
+	return gen.NewWorldgenRandomXoroshiro(seed >> 16)
 }
 
-func matchesStructureRuleTest(state gen.BlockState, test structureRuleTest, rng *gen.Xoroshiro128) bool {
+func matchesStructureRuleTest(state gen.BlockState, test structureRuleTest, rng *gen.WorldgenRandom) bool {
 	switch test.kind {
 	case "", "always_true":
 		return true
@@ -462,7 +462,7 @@ func matchesStructureRuleTest(state gen.BlockState, test structureRuleTest, rng 
 	}
 }
 
-func matchesStructurePosRuleTest(templatePos [3]int, worldPos, reference cube.Pos, test structurePosRuleTest, rng *gen.Xoroshiro128) bool {
+func matchesStructurePosRuleTest(templatePos [3]int, worldPos, reference cube.Pos, test structurePosRuleTest, rng *gen.WorldgenRandom) bool {
 	switch test.kind {
 	case "", "always_true":
 		return true
@@ -487,7 +487,7 @@ func matchesStructurePosRuleTest(templatePos [3]int, worldPos, reference cube.Po
 	}
 }
 
-func applyStructureBlockEntityModifier(modifier structureBlockEntityModifier, rng *gen.Xoroshiro128, existing map[string]any) map[string]any {
+func applyStructureBlockEntityModifier(modifier structureBlockEntityModifier, rng *gen.WorldgenRandom, existing map[string]any) map[string]any {
 	switch modifier.kind {
 	case "", "passthrough":
 		return cloneStructureNBT(existing)

@@ -82,23 +82,23 @@ func (g Generator) carveCaveSystem(c *chunk.Chunk, chunkX, chunkZ, minY, maxY in
 			caveCount := int(rng.NextInt(15)) + 1
 			for i := 0; i < caveCount; i++ {
 				startX := float64(startChunkX*16) + rng.NextDouble()*16.0
-				startY := float64(g.sampleHeightProvider(cfg.Y, minY, maxY, &rng))
+				startY := float64(g.sampleHeightProvider(cfg.Y, minY, maxY, rng))
 				startZ := float64(startChunkZ*16) + rng.NextDouble()*16.0
-				yScale := maxFloat(0.1, g.sampleFloatProvider(cfg.YScale, &rng))
-				hRadius := maxFloat(0.5, g.sampleFloatProvider(cfg.HorizontalRadiusMultiplier, &rng)*(1.0+rng.NextDouble()*3.0))
-				vRadius := maxFloat(0.35, g.sampleFloatProvider(cfg.VerticalRadiusMultiplier, &rng)*(0.75+rng.NextDouble()*1.5)*yScale)
-				floorLevel := g.sampleFloatProvider(cfg.FloorLevel, &rng)
+				yScale := maxFloat(0.1, g.sampleFloatProvider(cfg.YScale, rng))
+				hRadius := maxFloat(0.5, g.sampleFloatProvider(cfg.HorizontalRadiusMultiplier, rng)*(1.0+rng.NextDouble()*3.0))
+				vRadius := maxFloat(0.35, g.sampleFloatProvider(cfg.VerticalRadiusMultiplier, rng)*(0.75+rng.NextDouble()*1.5)*yScale)
+				floorLevel := g.sampleFloatProvider(cfg.FloorLevel, rng)
 				yaw := rng.NextDouble() * math.Pi * 2.0
 				pitch := (rng.NextDouble() - 0.5) * math.Pi / 4.0
 				branchCount := int(rng.NextInt(40)) + 40
 
-				g.carveCaveBranch(c, chunkX, chunkZ, minY, maxY, &rng, startX, startY, startZ, hRadius, vRadius, floorLevel, yaw, pitch, branchCount, lavaLevel, aquifer)
+				g.carveCaveBranch(c, chunkX, chunkZ, minY, maxY, rng, startX, startY, startZ, hRadius, vRadius, floorLevel, yaw, pitch, branchCount, lavaLevel, aquifer)
 			}
 		}
 	}
 }
 
-func (g Generator) carveCaveBranch(c *chunk.Chunk, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, startX, startY, startZ, hRadius, vRadius, floorLevel, yaw, pitch float64, branchCount, lavaLevel int, aquifer *gen.NoiseBasedAquifer) {
+func (g Generator) carveCaveBranch(c *chunk.Chunk, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, startX, startY, startZ, hRadius, vRadius, floorLevel, yaw, pitch float64, branchCount, lavaLevel int, aquifer *gen.NoiseBasedAquifer) {
 	chunkCenterX := float64(chunkX*16) + 8.0
 	chunkCenterZ := float64(chunkZ*16) + 8.0
 
@@ -195,20 +195,20 @@ func (g Generator) carveCanyonSystem(c *chunk.Chunk, chunkX, chunkZ, minY, maxY 
 			}
 
 			startX := float64(startChunkX*16) + rng.NextDouble()*16.0
-			startY := float64(g.sampleHeightProvider(cfg.Y, minY, maxY, &rng))
+			startY := float64(g.sampleHeightProvider(cfg.Y, minY, maxY, rng))
 			startZ := float64(startChunkZ*16) + rng.NextDouble()*16.0
-			length := max(24, int(float64(50+int(rng.NextInt(40)))*maxFloat(0.5, g.sampleFloatProvider(cfg.Shape.DistanceFactor, &rng))))
-			yScale := maxFloat(0.6, g.sampleFloatProvider(cfg.YScale, &rng))
-			thickness := maxFloat(0.8, g.sampleFloatProvider(cfg.Shape.Thickness, &rng))
-			horizontalFactor := maxFloat(0.6, g.sampleFloatProvider(cfg.Shape.HorizontalRadiusFactor, &rng))
-			verticalRotation := g.sampleFloatProvider(cfg.VerticalRotation, &rng)
+			length := max(24, int(float64(50+int(rng.NextInt(40)))*maxFloat(0.5, g.sampleFloatProvider(cfg.Shape.DistanceFactor, rng))))
+			yScale := maxFloat(0.6, g.sampleFloatProvider(cfg.YScale, rng))
+			thickness := maxFloat(0.8, g.sampleFloatProvider(cfg.Shape.Thickness, rng))
+			horizontalFactor := maxFloat(0.6, g.sampleFloatProvider(cfg.Shape.HorizontalRadiusFactor, rng))
+			verticalRotation := g.sampleFloatProvider(cfg.VerticalRotation, rng)
 
-			g.carveCanyonPath(c, chunkX, chunkZ, minY, maxY, &rng, startX, startY, startZ, length, yScale, thickness, horizontalFactor, verticalRotation, cfg, lavaLevel, aquifer)
+			g.carveCanyonPath(c, chunkX, chunkZ, minY, maxY, rng, startX, startY, startZ, length, yScale, thickness, horizontalFactor, verticalRotation, cfg, lavaLevel, aquifer)
 		}
 	}
 }
 
-func (g Generator) carveCanyonPath(c *chunk.Chunk, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, startX, startY, startZ float64, length int, yScale, thickness, horizontalFactor, verticalRotation float64, cfg gen.CanyonCarverConfig, lavaLevel int, aquifer *gen.NoiseBasedAquifer) {
+func (g Generator) carveCanyonPath(c *chunk.Chunk, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, startX, startY, startZ float64, length int, yScale, thickness, horizontalFactor, verticalRotation float64, cfg gen.CanyonCarverConfig, lavaLevel int, aquifer *gen.NoiseBasedAquifer) {
 	chunkCenterX := float64(chunkX*16) + 8.0
 	chunkCenterZ := float64(chunkZ*16) + 8.0
 
@@ -318,7 +318,7 @@ func (g Generator) isCarverReplaceableRID(rid uint32) bool {
 	return g.dimension == world.Overworld && rid == g.deepRID
 }
 
-func (g Generator) sampleFloatProvider(provider gen.FloatProvider, rng *gen.Xoroshiro128) float64 {
+func (g Generator) sampleFloatProvider(provider gen.FloatProvider, rng *gen.WorldgenRandom) float64 {
 	switch provider.Kind {
 	case "constant":
 		if provider.Constant != nil {
@@ -364,11 +364,11 @@ func (g Generator) sampleFloatProvider(provider gen.FloatProvider, rng *gen.Xoro
 	}
 }
 
-func (g Generator) carverRNG(chunkX, chunkZ int, carverName string) gen.Xoroshiro128 {
+func (g Generator) carverRNG(chunkX, chunkZ int, carverName string) *gen.WorldgenRandom {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(carverName))
 	seed := int64(h.Sum64()) ^ g.seed ^ int64(chunkX)*341873128712 ^ int64(chunkZ)*132897987541
-	return gen.NewXoroshiro128FromSeed(seed)
+	return gen.NewWorldgenRandomXoroshiro(seed)
 }
 
 func clampFloat(value, low, high float64) float64 {

@@ -164,17 +164,17 @@ func (g Generator) runPlacedFeature(c *chunk.Chunk, biomes sourceBiomeVolume, ch
 
 	origin := cube.Pos{chunkX * 16, minY, chunkZ * 16}
 	rng := g.featureRNG(decorationSeed, featureIndex, step)
-	positions, ok := g.applyPlacementModifiers(c, biomes, []cube.Pos{origin}, placed.Placement, featureName, chunkX, chunkZ, minY, maxY, &rng)
+	positions, ok := g.applyPlacementModifiers(c, biomes, []cube.Pos{origin}, placed.Placement, featureName, chunkX, chunkZ, minY, maxY, rng)
 	if !ok {
 		return
 	}
 
 	for _, pos := range positions {
-		g.executeConfiguredFeature(c, biomes, pos, placed.Feature, featureName, chunkX, chunkZ, minY, maxY, &rng, 0)
+		g.executeConfiguredFeature(c, biomes, pos, placed.Feature, featureName, chunkX, chunkZ, minY, maxY, rng, 0)
 	}
 }
 
-func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, featureRef gen.ConfiguredFeatureRef, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, depth int) bool {
+func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, featureRef gen.ConfiguredFeatureRef, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, depth int) bool {
 	if depth > 8 {
 		return false
 	}
@@ -511,7 +511,7 @@ func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVo
 	}
 }
 
-func (g Generator) executePlacedFeatureRef(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, placedRef gen.PlacedFeatureRef, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, depth int) bool {
+func (g Generator) executePlacedFeatureRef(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, placedRef gen.PlacedFeatureRef, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, depth int) bool {
 	if depth > 8 {
 		return false
 	}
@@ -537,7 +537,7 @@ func (g Generator) executePlacedFeatureRef(c *chunk.Chunk, biomes sourceBiomeVol
 	return placedAny
 }
 
-func (g Generator) executeRandomPatch(c *chunk.Chunk, biomes sourceBiomeVolume, origin cube.Pos, cfg gen.RandomPatchConfig, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, depth int) bool {
+func (g Generator) executeRandomPatch(c *chunk.Chunk, biomes sourceBiomeVolume, origin cube.Pos, cfg gen.RandomPatchConfig, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, depth int) bool {
 	var placedAny bool
 	for attempt := 0; attempt < cfg.Tries; attempt++ {
 		pos := origin.Add(cube.Pos{
@@ -555,7 +555,7 @@ func (g Generator) executeRandomPatch(c *chunk.Chunk, biomes sourceBiomeVolume, 
 	return placedAny
 }
 
-func (g Generator) executeBlockColumn(c *chunk.Chunk, origin cube.Pos, cfg gen.BlockColumnConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeBlockColumn(c *chunk.Chunk, origin cube.Pos, cfg gen.BlockColumnConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	dir := blockColumnDirection(cfg.Direction)
 	if dir == (cube.Pos{}) {
 		return false
@@ -582,7 +582,7 @@ func (g Generator) executeBlockColumn(c *chunk.Chunk, origin cube.Pos, cfg gen.B
 	return placedAny
 }
 
-func (g Generator) executeSeagrass(c *chunk.Chunk, pos cube.Pos, cfg gen.SeagrassConfig, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeSeagrass(c *chunk.Chunk, pos cube.Pos, cfg gen.SeagrassConfig, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if pos[1] <= minY || pos[1] >= maxY {
 		return false
 	}
@@ -604,7 +604,7 @@ func (g Generator) executeSeagrass(c *chunk.Chunk, pos cube.Pos, cfg gen.Seagras
 	return g.setBlockStateDirect(c, pos, gen.BlockState{Name: "seagrass"})
 }
 
-func (g Generator) executeKelp(c *chunk.Chunk, pos cube.Pos, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeKelp(c *chunk.Chunk, pos cube.Pos, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if pos[1] <= minY || pos[1] >= maxY {
 		return false
 	}
@@ -627,7 +627,7 @@ func (g Generator) executeKelp(c *chunk.Chunk, pos cube.Pos, minY, maxY int, rng
 	return placedAny
 }
 
-func (g Generator) executeMultifaceGrowth(c *chunk.Chunk, pos cube.Pos, cfg gen.MultifaceGrowthConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeMultifaceGrowth(c *chunk.Chunk, pos cube.Pos, cfg gen.MultifaceGrowthConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	for attempt := 0; attempt <= max(1, cfg.SearchRange); attempt++ {
 		candidate := pos.Add(cube.Pos{
 			int(rng.NextInt(uint32(max(1, cfg.SearchRange*2+1)))) - cfg.SearchRange,
@@ -648,7 +648,7 @@ func (g Generator) executeMultifaceGrowth(c *chunk.Chunk, pos cube.Pos, cfg gen.
 	return false
 }
 
-func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, scattered bool) bool {
+func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, scattered bool) bool {
 	if cfg.Size <= 0 {
 		return false
 	}
@@ -707,7 +707,7 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 	return placedAny
 }
 
-func (g Generator) executeDisk(c *chunk.Chunk, pos cube.Pos, cfg gen.DiskConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeDisk(c *chunk.Chunk, pos cube.Pos, cfg gen.DiskConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	radius := max(1, g.sampleIntProvider(cfg.Radius, rng))
 	var placedAny bool
 	for dx := -radius; dx <= radius; dx++ {
@@ -734,7 +734,7 @@ func (g Generator) executeDisk(c *chunk.Chunk, pos cube.Pos, cfg gen.DiskConfig,
 	return placedAny
 }
 
-func (g Generator) executeSpringFeature(c *chunk.Chunk, pos cube.Pos, cfg gen.SpringFeatureConfig, chunkX, chunkZ, minY, maxY int, _ *gen.Xoroshiro128) bool {
+func (g Generator) executeSpringFeature(c *chunk.Chunk, pos cube.Pos, cfg gen.SpringFeatureConfig, chunkX, chunkZ, minY, maxY int, _ *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -773,7 +773,7 @@ func (g Generator) executeSpringFeature(c *chunk.Chunk, pos cube.Pos, cfg gen.Sp
 	return g.setBlockStateDirect(c, pos, cfg.State)
 }
 
-func (g Generator) executeUnderwaterMagma(c *chunk.Chunk, pos cube.Pos, cfg gen.UnderwaterMagmaConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeUnderwaterMagma(c *chunk.Chunk, pos cube.Pos, cfg gen.UnderwaterMagmaConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	floorY := -1
 	for y := pos[1]; y >= max(minY, pos[1]-cfg.FloorSearchRange); y-- {
 		candidate := cube.Pos{pos[0], y, pos[2]}
@@ -806,7 +806,7 @@ func (g Generator) executeUnderwaterMagma(c *chunk.Chunk, pos cube.Pos, cfg gen.
 	return placedAny
 }
 
-func (g Generator) executePointedDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen.PointedDripstoneConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executePointedDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen.PointedDripstoneConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -849,7 +849,7 @@ func (g Generator) executePointedDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen
 	return true
 }
 
-func (g Generator) executeDripstoneCluster(c *chunk.Chunk, pos cube.Pos, cfg gen.DripstoneClusterConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeDripstoneCluster(c *chunk.Chunk, pos cube.Pos, cfg gen.DripstoneClusterConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	floor, ceiling, ok := g.findFloorAndCeiling(c, pos, cfg.FloorToCeilingSearchRange, chunkX, chunkZ, minY, maxY)
 	if !ok {
 		return false
@@ -887,7 +887,7 @@ func (g Generator) executeDripstoneCluster(c *chunk.Chunk, pos cube.Pos, cfg gen
 	return placedAny
 }
 
-func (g Generator) executeLargeDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen.LargeDripstoneConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeLargeDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen.LargeDripstoneConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInFeatureScope(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -932,7 +932,7 @@ func (g Generator) executeLargeDripstone(c *chunk.Chunk, pos cube.Pos, cfg gen.L
 	return placedDown || placedUp
 }
 
-func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	type geodePoint struct {
 		pos    cube.Pos
 		offset int
@@ -1073,7 +1073,7 @@ func (g Generator) executeGeode(c *chunk.Chunk, pos cube.Pos, cfg gen.GeodeConfi
 	return placedAny
 }
 
-func (g Generator) executeFossil(c *chunk.Chunk, pos cube.Pos, cfg gen.FossilConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeFossil(c *chunk.Chunk, pos cube.Pos, cfg gen.FossilConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if len(cfg.FossilStructures) == 0 || len(cfg.FossilStructures) != len(cfg.OverlayStructures) || g.structureTemplates == nil {
 		return false
 	}
@@ -1198,7 +1198,7 @@ func (g Generator) geodeNoiseValue(pos cube.Pos) float64 {
 	return v - math.Floor(v)
 }
 
-func (g Generator) placeLargeDripstoneColumn(c *chunk.Chunk, root cube.Pos, pointingUp bool, radius int, bluntness, scale float64, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) placeLargeDripstoneColumn(c *chunk.Chunk, root cube.Pos, pointingUp bool, radius int, bluntness, scale float64, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	var placedAny bool
 	for dx := -radius; dx <= radius; dx++ {
 		for dz := -radius; dz <= radius; dz++ {
@@ -1255,7 +1255,7 @@ func (g Generator) largeDripstoneHeightAtRadius(checkRadius float64, radius int,
 	return int(math.Round(height))
 }
 
-func (g Generator) executeSculkPatch(c *chunk.Chunk, pos cube.Pos, cfg gen.SculkPatchConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeSculkPatch(c *chunk.Chunk, pos cube.Pos, cfg gen.SculkPatchConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	attempts := max(1, min(cfg.SpreadAttempts, cfg.ChargeCount*cfg.SpreadRounds*4))
 	var placedAny bool
 	for i := 0; i < attempts; i++ {
@@ -1294,7 +1294,7 @@ func (g Generator) executeSculkPatch(c *chunk.Chunk, pos cube.Pos, cfg gen.Sculk
 	return placedAny
 }
 
-func (g Generator) executeVines(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeVines(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -1331,7 +1331,7 @@ func (g Generator) executeVines(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, mi
 	return placedAny
 }
 
-func (g Generator) executeSeaPickle(c *chunk.Chunk, pos cube.Pos, cfg gen.SeaPickleConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeSeaPickle(c *chunk.Chunk, pos cube.Pos, cfg gen.SeaPickleConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -1349,7 +1349,7 @@ func (g Generator) executeSeaPickle(c *chunk.Chunk, pos cube.Pos, cfg gen.SeaPic
 	return g.setFeatureBlock(c, pos, block.SeaPickle{AdditionalCount: additional})
 }
 
-func (g Generator) executeLake(c *chunk.Chunk, pos cube.Pos, cfg gen.LakeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeLake(c *chunk.Chunk, pos cube.Pos, cfg gen.LakeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) || pos[1] <= minY+4 || pos[1] >= maxY-4 {
 		return false
 	}
@@ -1502,7 +1502,7 @@ func (g Generator) executeFreezeTopLayer(c *chunk.Chunk, biomes sourceBiomeVolum
 	return placedAny
 }
 
-func (g Generator) executeFallenTree(c *chunk.Chunk, pos cube.Pos, cfg gen.FallenTreeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeFallenTree(c *chunk.Chunk, pos cube.Pos, cfg gen.FallenTreeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	trunkState, ok := g.selectState(c, cfg.TrunkProvider, pos, rng, minY, maxY)
 	if !ok {
 		return false
@@ -1560,11 +1560,11 @@ func (g Generator) executeFallenTree(c *chunk.Chunk, pos cube.Pos, cfg gen.Falle
 	return placedAny
 }
 
-func (g Generator) executeTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	return g.executeJavaTree(c, pos, cfg, minY, maxY, rng)
 }
 
-func (g Generator) executeBlockBlob(c *chunk.Chunk, pos cube.Pos, cfg gen.BlockBlobConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeBlockBlob(c *chunk.Chunk, pos cube.Pos, cfg gen.BlockBlobConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	origin := pos
 	for origin[1] > minY+3 {
 		below := origin.Side(cube.FaceDown)
@@ -1613,7 +1613,7 @@ func (g Generator) executeBlockBlob(c *chunk.Chunk, pos cube.Pos, cfg gen.BlockB
 	return placedAny
 }
 
-func (g Generator) executeBamboo(c *chunk.Chunk, pos cube.Pos, cfg gen.BambooConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeBamboo(c *chunk.Chunk, pos cube.Pos, cfg gen.BambooConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) || pos[1] <= minY || pos[1] >= maxY {
 		return false
 	}
@@ -1695,15 +1695,15 @@ func (g Generator) executeBamboo(c *chunk.Chunk, pos cube.Pos, cfg gen.BambooCon
 	return true
 }
 
-func (g Generator) executeHugeBrownMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeMushroomConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeHugeBrownMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeMushroomConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	return g.executeHugeMushroom(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng, false)
 }
 
-func (g Generator) executeHugeRedMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeMushroomConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeHugeRedMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeMushroomConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	return g.executeHugeMushroom(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng, true)
 }
 
-func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	xr := int(rng.NextInt(2)) + 2
 	zr := int(rng.NextInt(2)) + 2
 	minX, maxXRoom := -xr-1, xr+1
@@ -1797,7 +1797,7 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 	return true
 }
 
-func (g Generator) executeDesertWell(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeDesertWell(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	origin := pos.Side(cube.FaceUp)
 	for g.blockNameAt(c, origin) == "air" && origin[1] > minY+2 {
 		origin = origin.Side(cube.FaceDown)
@@ -1879,7 +1879,7 @@ func (g Generator) executeDesertWell(c *chunk.Chunk, pos cube.Pos, chunkX, chunk
 	return true
 }
 
-func (g Generator) executeHugeMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeMushroomConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, red bool) bool {
+func (g Generator) executeHugeMushroom(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeMushroomConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, red bool) bool {
 	treeHeight := 4 + int(rng.NextInt(3))
 	if rng.NextInt(12) == 0 {
 		treeHeight *= 2
@@ -2028,7 +2028,7 @@ func (g Generator) placeHugeMushroomState(c *chunk.Chunk, pos cube.Pos, state ge
 	return g.setBlockStateDirect(c, pos, state)
 }
 
-func (g Generator) executeVegetationPatch(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, cfg gen.VegetationPatchConfig, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, depth int, waterlogged bool) bool {
+func (g Generator) executeVegetationPatch(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, cfg gen.VegetationPatchConfig, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, depth int, waterlogged bool) bool {
 	radius := max(1, g.sampleIntProvider(cfg.XZRadius, rng))
 	patchDepth := max(1, g.sampleIntProvider(cfg.Depth, rng))
 	var placedAny bool
@@ -2081,7 +2081,7 @@ func (g Generator) executeVegetationPatch(c *chunk.Chunk, biomes sourceBiomeVolu
 	return placedAny
 }
 
-func (g Generator) executeRootSystem(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, cfg gen.RootSystemConfig, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128, depth int) bool {
+func (g Generator) executeRootSystem(c *chunk.Chunk, biomes sourceBiomeVolume, pos cube.Pos, cfg gen.RootSystemConfig, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, depth int) bool {
 	if !g.positionInFeatureScope(pos, chunkX, chunkZ, minY, maxY) || !g.testBlockPredicate(c, pos, cfg.AllowedTreePosition, chunkX, chunkZ, minY, maxY, rng) {
 		return false
 	}
@@ -2141,7 +2141,7 @@ func (g Generator) executeRootSystem(c *chunk.Chunk, biomes sourceBiomeVolume, p
 	return true
 }
 
-func (g Generator) executeHugeFungus(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeFungusConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeHugeFungus(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeFungusConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) || pos[1] <= minY+1 {
 		return false
 	}
@@ -2217,7 +2217,7 @@ func (g Generator) executeHugeFungus(c *chunk.Chunk, pos cube.Pos, cfg gen.HugeF
 	return placedAny
 }
 
-func (g Generator) executeNetherForestVegetation(c *chunk.Chunk, pos cube.Pos, cfg gen.NetherForestVegetationConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeNetherForestVegetation(c *chunk.Chunk, pos cube.Pos, cfg gen.NetherForestVegetationConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	attempts := max(16, cfg.SpreadWidth*cfg.SpreadWidth)
 	var placedAny bool
 	for i := 0; i < attempts; i++ {
@@ -2242,7 +2242,7 @@ func (g Generator) executeNetherForestVegetation(c *chunk.Chunk, pos cube.Pos, c
 	return placedAny
 }
 
-func (g Generator) executeTwistingVines(c *chunk.Chunk, pos cube.Pos, cfg gen.TwistingVinesConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeTwistingVines(c *chunk.Chunk, pos cube.Pos, cfg gen.TwistingVinesConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	attempts := max(16, cfg.SpreadWidth*cfg.SpreadWidth)
 	var placedAny bool
 	for i := 0; i < attempts; i++ {
@@ -2274,7 +2274,7 @@ func (g Generator) executeTwistingVines(c *chunk.Chunk, pos cube.Pos, cfg gen.Tw
 	return placedAny
 }
 
-func (g Generator) executeWeepingVines(c *chunk.Chunk, pos cube.Pos, _ gen.WeepingVinesConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeWeepingVines(c *chunk.Chunk, pos cube.Pos, _ gen.WeepingVinesConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	var placedAny bool
 	for i := 0; i < 32; i++ {
 		candidate := pos.Add(cube.Pos{
@@ -2305,7 +2305,7 @@ func (g Generator) executeWeepingVines(c *chunk.Chunk, pos cube.Pos, _ gen.Weepi
 	return placedAny
 }
 
-func (g Generator) executeNetherrackReplaceBlobs(c *chunk.Chunk, pos cube.Pos, cfg gen.NetherrackReplaceBlobsConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeNetherrackReplaceBlobs(c *chunk.Chunk, pos cube.Pos, cfg gen.NetherrackReplaceBlobsConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	radius := max(1, g.sampleIntProvider(cfg.Radius, rng))
 	targetName := normalizeFeatureStateName(cfg.Target.Name)
 	var placedAny bool
@@ -2331,7 +2331,7 @@ func (g Generator) executeNetherrackReplaceBlobs(c *chunk.Chunk, pos cube.Pos, c
 	return placedAny
 }
 
-func (g Generator) executeGlowstoneBlob(c *chunk.Chunk, pos cube.Pos, _ gen.GlowstoneBlobConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeGlowstoneBlob(c *chunk.Chunk, pos cube.Pos, _ gen.GlowstoneBlobConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) || c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0) != g.airRID {
 		return false
 	}
@@ -2368,7 +2368,7 @@ func (g Generator) executeGlowstoneBlob(c *chunk.Chunk, pos cube.Pos, _ gen.Glow
 	return placedAny
 }
 
-func (g Generator) executeBasaltPillar(c *chunk.Chunk, pos cube.Pos, _ gen.BasaltPillarConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeBasaltPillar(c *chunk.Chunk, pos cube.Pos, _ gen.BasaltPillarConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -2398,7 +2398,7 @@ func (g Generator) executeBasaltPillar(c *chunk.Chunk, pos cube.Pos, _ gen.Basal
 	return placedAny
 }
 
-func (g Generator) executeBasaltColumns(c *chunk.Chunk, pos cube.Pos, cfg gen.BasaltColumnsConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeBasaltColumns(c *chunk.Chunk, pos cube.Pos, cfg gen.BasaltColumnsConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	reach := max(1, g.sampleIntProvider(cfg.Reach, rng))
 	height := max(1, g.sampleIntProvider(cfg.Height, rng))
 	var placedAny bool
@@ -2431,7 +2431,7 @@ func (g Generator) executeBasaltColumns(c *chunk.Chunk, pos cube.Pos, cfg gen.Ba
 	return placedAny
 }
 
-func (g Generator) executeDeltaFeature(c *chunk.Chunk, pos cube.Pos, cfg gen.DeltaFeatureConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeDeltaFeature(c *chunk.Chunk, pos cube.Pos, cfg gen.DeltaFeatureConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	size := max(2, g.sampleIntProvider(cfg.Size, rng))
 	rim := max(0, g.sampleIntProvider(cfg.RimSize, rng))
 	var placedAny bool
@@ -2459,7 +2459,7 @@ func (g Generator) executeDeltaFeature(c *chunk.Chunk, pos cube.Pos, cfg gen.Del
 	return placedAny
 }
 
-func (g Generator) executeChorusPlant(c *chunk.Chunk, pos cube.Pos, _ gen.ChorusPlantConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeChorusPlant(c *chunk.Chunk, pos cube.Pos, _ gen.ChorusPlantConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) || !supportsChorusBlock(g.worldBlockAtChunkSafe(c, pos.Side(cube.FaceDown), chunkX, chunkZ, minY, maxY)) {
 		return false
 	}
@@ -2503,7 +2503,7 @@ func (g Generator) executeChorusPlant(c *chunk.Chunk, pos cube.Pos, _ gen.Chorus
 	return true
 }
 
-func (g Generator) executeEndIsland(c *chunk.Chunk, pos cube.Pos, _ gen.EndIslandConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeEndIsland(c *chunk.Chunk, pos cube.Pos, _ gen.EndIslandConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	radius := 3 + int(rng.NextInt(4))
 	var placedAny bool
 	for layer := 0; radius > 0; layer++ {
@@ -2569,7 +2569,7 @@ func (g Generator) executeVoidStartPlatform(c *chunk.Chunk, pos cube.Pos, chunkX
 	return placedAny
 }
 
-func (g Generator) executeIceberg(c *chunk.Chunk, pos cube.Pos, cfg gen.BlockStateFeatureConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeIceberg(c *chunk.Chunk, pos cube.Pos, cfg gen.BlockStateFeatureConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	origin := cube.Pos{pos[0], seaLevel, pos[2]}
 	snowOnTop := rng.NextDouble() > 0.7
 	shapeAngle := rng.NextDouble() * 2.0 * math.Pi
@@ -2626,7 +2626,7 @@ func (g Generator) executeIceberg(c *chunk.Chunk, pos cube.Pos, cfg gen.BlockSta
 	return placedAny
 }
 
-func (g Generator) executeBlueIce(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeBlueIce(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if pos[1] > seaLevel-1 || !g.positionInFeatureScope(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -2688,7 +2688,7 @@ func (g Generator) executeBlueIce(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, 
 	return placedAny
 }
 
-func icebergHeightDependentRadiusRound(rng *gen.Xoroshiro128, yOff, height, width int) int {
+func icebergHeightDependentRadiusRound(rng *gen.WorldgenRandom, yOff, height, width int) int {
 	k := 3.5 - rng.NextDouble()
 	scale := (1.0 - math.Pow(float64(yOff), 2.0)/(float64(height)*k)) * float64(width)
 	if height > 15+int(rng.NextInt(5)) {
@@ -2706,13 +2706,13 @@ func icebergHeightDependentRadiusEllipse(yOff, height, width int) int {
 	return int(math.Ceil(scale / 2.0))
 }
 
-func icebergHeightDependentRadiusSteep(rng *gen.Xoroshiro128, yOff, height, width int) int {
+func icebergHeightDependentRadiusSteep(rng *gen.WorldgenRandom, yOff, height, width int) int {
 	k := 1.0 + rng.NextDouble()/2.0
 	scale := (1.0 - float64(yOff)/(float64(height)*k)) * float64(width)
 	return int(math.Ceil(scale / 2.0))
 }
 
-func icebergSignedDistanceCircle(xo, zo int, radius int, rng *gen.Xoroshiro128) float64 {
+func icebergSignedDistanceCircle(xo, zo int, radius int, rng *gen.WorldgenRandom) float64 {
 	off := 10.0 * max(0.2, min(0.8, rng.NextDouble())) / float64(radius)
 	return off + math.Pow(float64(xo), 2.0) + math.Pow(float64(zo), 2.0) - math.Pow(float64(radius), 2.0)
 }
@@ -2734,7 +2734,7 @@ func icebergEllipseC(yOff, height, shapeEllipseC int) int {
 	return c
 }
 
-func (g Generator) generateIcebergBlock(c *chunk.Chunk, origin cube.Pos, height, xo, yOff, zo, radius, a int, isEllipse bool, shapeEllipseC int, shapeAngle float64, snowOnTop bool, mainState gen.BlockState, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) generateIcebergBlock(c *chunk.Chunk, origin cube.Pos, height, xo, yOff, zo, radius, a int, isEllipse bool, shapeEllipseC int, shapeAngle float64, snowOnTop bool, mainState gen.BlockState, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	var signedDist float64
 	if isEllipse {
 		signedDist = icebergSignedDistanceEllipse(xo, zo, a, icebergEllipseC(yOff, height, shapeEllipseC), shapeAngle)
@@ -2755,7 +2755,7 @@ func (g Generator) generateIcebergBlock(c *chunk.Chunk, origin cube.Pos, height,
 	return g.setIcebergBlock(c, pos, height-yOff, height, isEllipse, snowOnTop, mainState, chunkX, chunkZ, minY, maxY, rng)
 }
 
-func (g Generator) setIcebergBlock(c *chunk.Chunk, pos cube.Pos, hDiff, height int, isEllipse, snowOnTop bool, mainState gen.BlockState, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) setIcebergBlock(c *chunk.Chunk, pos cube.Pos, hDiff, height int, isEllipse, snowOnTop bool, mainState gen.BlockState, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInFeatureScope(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -2820,7 +2820,7 @@ func (g Generator) smoothIceberg(c *chunk.Chunk, origin cube.Pos, width, height 
 	}
 }
 
-func (g Generator) executeSpike(c *chunk.Chunk, pos cube.Pos, cfg gen.SpikeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeSpike(c *chunk.Chunk, pos cube.Pos, cfg gen.SpikeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	origin := pos
 	for g.blockNameAt(c, origin) == "air" && origin[1] > minY+2 {
 		origin = origin.Side(cube.FaceDown)
@@ -2919,7 +2919,7 @@ func (g Generator) executeSpike(c *chunk.Chunk, pos cube.Pos, cfg gen.SpikeConfi
 	return placedAny
 }
 
-func (g Generator) executeEndSpike(c *chunk.Chunk, _ cube.Pos, _ gen.EndSpikeConfig, chunkX, chunkZ, minY, maxY int, _ *gen.Xoroshiro128) bool {
+func (g Generator) executeEndSpike(c *chunk.Chunk, _ cube.Pos, _ gen.EndSpikeConfig, chunkX, chunkZ, minY, maxY int, _ *gen.WorldgenRandom) bool {
 	var placedAny bool
 	for _, spike := range endSpikesForSeed(g.seed) {
 		if !spikeIntersectsChunk(spike, chunkX, chunkZ) {
@@ -3001,7 +3001,7 @@ type endSpike struct {
 }
 
 func endSpikesForSeed(seed int64) []endSpike {
-	rng := gen.NewXoroshiro128FromSeed(seed ^ 0x4f9939f508)
+	rng := gen.NewWorldgenRandomXoroshiro(seed ^ 0x4f9939f508)
 	out := make([]endSpike, 0, 10)
 	for i := 0; i < 10; i++ {
 		angle := float64(i) * (2 * math.Pi / 10)
@@ -3080,7 +3080,7 @@ func (g Generator) collectTreeStructure(c *chunk.Chunk, origin, top cube.Pos, he
 	return trunks, leaves
 }
 
-func (g Generator) applyTreeDecorators(c *chunk.Chunk, origin cube.Pos, trunkPositions, leafPositions []cube.Pos, decorators []gen.FeatureDecorator, rng *gen.Xoroshiro128, minY, maxY int) {
+func (g Generator) applyTreeDecorators(c *chunk.Chunk, origin cube.Pos, trunkPositions, leafPositions []cube.Pos, decorators []gen.FeatureDecorator, rng *gen.WorldgenRandom, minY, maxY int) {
 	if len(decorators) == 0 {
 		return
 	}
@@ -3134,7 +3134,7 @@ func (g Generator) applyTreeDecorators(c *chunk.Chunk, origin cube.Pos, trunkPos
 	}
 }
 
-func (g Generator) applyAttachedLogDecorators(c *chunk.Chunk, logPositions []cube.Pos, decorators []gen.FeatureDecorator, rng *gen.Xoroshiro128, minY, maxY int) {
+func (g Generator) applyAttachedLogDecorators(c *chunk.Chunk, logPositions []cube.Pos, decorators []gen.FeatureDecorator, rng *gen.WorldgenRandom, minY, maxY int) {
 	for _, decorator := range decorators {
 		if decorator.Type != "attached_to_logs" {
 			continue
@@ -3166,7 +3166,7 @@ func (g Generator) applyAttachedLogDecorators(c *chunk.Chunk, logPositions []cub
 	}
 }
 
-func (g Generator) placeBeeNestDecorator(c *chunk.Chunk, trunkPositions []cube.Pos, rng *gen.Xoroshiro128, probability float64) {
+func (g Generator) placeBeeNestDecorator(c *chunk.Chunk, trunkPositions []cube.Pos, rng *gen.WorldgenRandom, probability float64) {
 	if len(trunkPositions) == 0 || probability <= 0 || rng.NextDouble() >= probability {
 		return
 	}
@@ -3185,7 +3185,7 @@ func (g Generator) placeBeeNestDecorator(c *chunk.Chunk, trunkPositions []cube.P
 	}
 }
 
-func (g Generator) placeGroundDecorator(c *chunk.Chunk, origin cube.Pos, provider gen.StateProvider, height, radius, tries int, rng *gen.Xoroshiro128, minY, maxY int) {
+func (g Generator) placeGroundDecorator(c *chunk.Chunk, origin cube.Pos, provider gen.StateProvider, height, radius, tries int, rng *gen.WorldgenRandom, minY, maxY int) {
 	for i := 0; i < tries; i++ {
 		x := origin[0] + int(rng.NextInt(uint32(radius*2+1))) - radius
 		z := origin[2] + int(rng.NextInt(uint32(radius*2+1))) - radius
@@ -3204,7 +3204,7 @@ func (g Generator) placeGroundDecorator(c *chunk.Chunk, origin cube.Pos, provide
 	}
 }
 
-func (g Generator) placeLeafVines(c *chunk.Chunk, leafPositions []cube.Pos, rng *gen.Xoroshiro128, probability float64, minY int) {
+func (g Generator) placeLeafVines(c *chunk.Chunk, leafPositions []cube.Pos, rng *gen.WorldgenRandom, probability float64, minY int) {
 	if probability <= 0 {
 		return
 	}
@@ -3222,7 +3222,7 @@ func (g Generator) placeLeafVines(c *chunk.Chunk, leafPositions []cube.Pos, rng 
 	}
 }
 
-func (g Generator) placeTrunkVines(c *chunk.Chunk, trunkPositions []cube.Pos, rng *gen.Xoroshiro128, minY int) {
+func (g Generator) placeTrunkVines(c *chunk.Chunk, trunkPositions []cube.Pos, rng *gen.WorldgenRandom, minY int) {
 	for _, trunkPos := range trunkPositions {
 		for _, face := range cube.HorizontalFaces() {
 			if rng.NextDouble() >= 0.15 {
@@ -3260,7 +3260,7 @@ func (g Generator) placeVineColumn(c *chunk.Chunk, pos cube.Pos, supportFace cub
 	}
 }
 
-func (g Generator) placeAttachedToLeaves(c *chunk.Chunk, leafPositions []cube.Pos, provider gen.StateProvider, directions []string, probability float64, requiredEmptyBlocks int, rng *gen.Xoroshiro128, minY, maxY int) {
+func (g Generator) placeAttachedToLeaves(c *chunk.Chunk, leafPositions []cube.Pos, provider gen.StateProvider, directions []string, probability float64, requiredEmptyBlocks int, rng *gen.WorldgenRandom, minY, maxY int) {
 	for _, leafPos := range leafPositions {
 		for _, direction := range directions {
 			if probability > 0 && rng.NextDouble() >= probability {
@@ -3292,7 +3292,7 @@ func (g Generator) placeAttachedToLeaves(c *chunk.Chunk, leafPositions []cube.Po
 	}
 }
 
-func (g Generator) alterGroundAroundTree(c *chunk.Chunk, origin cube.Pos, provider gen.StateProvider, rng *gen.Xoroshiro128, minY, maxY int) {
+func (g Generator) alterGroundAroundTree(c *chunk.Chunk, origin cube.Pos, provider gen.StateProvider, rng *gen.WorldgenRandom, minY, maxY int) {
 	for dx := -2; dx <= 2; dx++ {
 		for dz := -2; dz <= 2; dz++ {
 			x := origin[0] + dx
@@ -3313,7 +3313,7 @@ func (g Generator) alterGroundAroundTree(c *chunk.Chunk, origin cube.Pos, provid
 	}
 }
 
-func (g Generator) applyPlacementModifiers(c *chunk.Chunk, biomes sourceBiomeVolume, positions []cube.Pos, modifiers []gen.PlacementModifier, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) ([]cube.Pos, bool) {
+func (g Generator) applyPlacementModifiers(c *chunk.Chunk, biomes sourceBiomeVolume, positions []cube.Pos, modifiers []gen.PlacementModifier, topFeatureName string, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) ([]cube.Pos, bool) {
 	out := slices.Clone(positions)
 
 	for _, modifier := range modifiers {
@@ -3544,7 +3544,7 @@ func (g Generator) countOnEveryLayerEmptyRID(rid uint32) bool {
 	return rid == g.airRID || rid == g.waterRID || rid == g.lavaRID
 }
 
-func (g Generator) placeStateProviderBlock(c *chunk.Chunk, pos cube.Pos, provider gen.StateProvider, rng *gen.Xoroshiro128, minY, maxY int) bool {
+func (g Generator) placeStateProviderBlock(c *chunk.Chunk, pos cube.Pos, provider gen.StateProvider, rng *gen.WorldgenRandom, minY, maxY int) bool {
 	state, ok := g.selectState(c, provider, pos, rng, minY, maxY)
 	if !ok {
 		return false
@@ -3552,7 +3552,7 @@ func (g Generator) placeStateProviderBlock(c *chunk.Chunk, pos cube.Pos, provide
 	return g.placeFeatureState(c, pos, state, rng, minY, maxY)
 }
 
-func (g Generator) selectState(c *chunk.Chunk, provider gen.StateProvider, pos cube.Pos, rng *gen.Xoroshiro128, minY, maxY int) (gen.BlockState, bool) {
+func (g Generator) selectState(c *chunk.Chunk, provider gen.StateProvider, pos cube.Pos, rng *gen.WorldgenRandom, minY, maxY int) (gen.BlockState, bool) {
 	c = g.chunkForActiveTreePos(c, pos)
 	switch provider.Type {
 	case "simple_state_provider":
@@ -3624,7 +3624,7 @@ func (g Generator) selectState(c *chunk.Chunk, provider gen.StateProvider, pos c
 	}
 }
 
-func (g Generator) placeFeatureState(c *chunk.Chunk, pos cube.Pos, state gen.BlockState, rng *gen.Xoroshiro128, minY, maxY int) bool {
+func (g Generator) placeFeatureState(c *chunk.Chunk, pos cube.Pos, state gen.BlockState, rng *gen.WorldgenRandom, minY, maxY int) bool {
 	featureBlock, ok := g.featureBlockFromState(state, rng)
 	if !ok || pos[1] <= minY || pos[1] > maxY {
 		return false
@@ -3716,7 +3716,7 @@ func (g Generator) heightmapPlacementYAtPos(c *chunk.Chunk, pos cube.Pos, kind s
 	return g.heightmapPlacementY(c, pos[0]&15, pos[2]&15, kind, minY, maxY)
 }
 
-func (g Generator) featureBlockFromState(state gen.BlockState, rng *gen.Xoroshiro128) (world.Block, bool) {
+func (g Generator) featureBlockFromState(state gen.BlockState, rng *gen.WorldgenRandom) (world.Block, bool) {
 	state = normalizeFeatureState(state)
 
 	switch state.Name {
@@ -4096,7 +4096,7 @@ func (g Generator) canReplaceFeatureBlock(current, with world.Block) bool {
 	return ok && replaceable.ReplaceableBy(with)
 }
 
-func (g Generator) canBlockStateSurvive(c *chunk.Chunk, pos cube.Pos, state gen.BlockState, rng *gen.Xoroshiro128, minY, maxY int) bool {
+func (g Generator) canBlockStateSurvive(c *chunk.Chunk, pos cube.Pos, state gen.BlockState, rng *gen.WorldgenRandom, minY, maxY int) bool {
 	stateName := normalizeFeatureStateName(state.Name)
 	if g.canNamedFeatureStateSurvive(c, pos, stateName, minY, maxY) {
 		return true
@@ -4259,7 +4259,7 @@ func matchesFeatureSupportBlockTag(b world.Block, tag string) bool {
 	return featureBlockTagMatches(featureBlockName(b), tag)
 }
 
-func (g Generator) testBlockPredicate(c *chunk.Chunk, pos cube.Pos, predicate gen.BlockPredicate, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) testBlockPredicate(c *chunk.Chunk, pos cube.Pos, predicate gen.BlockPredicate, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	switch predicate.Type {
 	case "matching_blocks":
 		cfg, err := predicate.MatchingBlocks()
@@ -4707,7 +4707,7 @@ func (g Generator) sampleNoiseBasedCount(cfg gen.NoiseBasedCountPlacement, pos c
 	return count
 }
 
-func (g Generator) sampleHeightProvider(provider gen.HeightProvider, minY, maxY int, rng *gen.Xoroshiro128) int {
+func (g Generator) sampleHeightProvider(provider gen.HeightProvider, minY, maxY int, rng *gen.WorldgenRandom) int {
 	low := clamp(g.anchorY(provider.MinInclusive, minY, maxY), minY, maxY)
 	high := clamp(g.anchorY(provider.MaxInclusive, minY, maxY), minY, maxY)
 	if high < low {
@@ -4757,7 +4757,7 @@ func (g Generator) anchorY(anchor gen.VerticalAnchor, minY, maxY int) int {
 	}
 }
 
-func (g Generator) scanEnvironment(c *chunk.Chunk, pos cube.Pos, cfg gen.EnvironmentScanPlacement, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) (cube.Pos, bool) {
+func (g Generator) scanEnvironment(c *chunk.Chunk, pos cube.Pos, cfg gen.EnvironmentScanPlacement, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) (cube.Pos, bool) {
 	dir := blockColumnDirection(cfg.DirectionOfSearch)
 	if dir == (cube.Pos{}) {
 		return cube.Pos{}, false
@@ -4850,7 +4850,7 @@ func (g Generator) displacedLiquidRuntimeID(c *chunk.Chunk, pos cube.Pos, featur
 	return 0, false
 }
 
-func (g Generator) tryPlaceOreAt(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) tryPlaceOreAt(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return false
 	}
@@ -4917,7 +4917,7 @@ func (g Generator) isExposedToAir(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, 
 	return false
 }
 
-func sampleTreeHeight(placer gen.TypedJSONValue, rng *gen.Xoroshiro128) (int, string) {
+func sampleTreeHeight(placer gen.TypedJSONValue, rng *gen.WorldgenRandom) (int, string) {
 	var raw struct {
 		BaseHeight  int `json:"base_height"`
 		HeightRandA int `json:"height_rand_a"`
@@ -5047,7 +5047,7 @@ func (g Generator) canTreeGrowInto(c *chunk.Chunk, pos cube.Pos, trunkBlock worl
 	return strings.HasSuffix(name, "_log") || strings.HasSuffix(name, "_wood") || strings.HasSuffix(name, "_stem")
 }
 
-func (g Generator) prepareTreeSoil(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, rng *gen.Xoroshiro128, minY, maxY int) bool {
+func (g Generator) prepareTreeSoil(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, rng *gen.WorldgenRandom, minY, maxY int) bool {
 	if pos[1] <= minY || pos[1] > maxY {
 		return false
 	}
@@ -5098,7 +5098,7 @@ func (g Generator) placeWideTrunk(c *chunk.Chunk, pos cube.Pos, trunk gen.BlockS
 	return cube.Pos{pos[0], currentY - 1, pos[2]}, true
 }
 
-func (g Generator) placeForkingAcaciaTrunk(c *chunk.Chunk, pos cube.Pos, trunk gen.BlockState, height int, rng *gen.Xoroshiro128, minY, maxY int) (cube.Pos, bool) {
+func (g Generator) placeForkingAcaciaTrunk(c *chunk.Chunk, pos cube.Pos, trunk gen.BlockState, height int, rng *gen.WorldgenRandom, minY, maxY int) (cube.Pos, bool) {
 	top, ok := g.placeVerticalTrunk(c, pos, trunk, max(2, height-1), minY, maxY)
 	if !ok {
 		return cube.Pos{}, false
@@ -5114,7 +5114,7 @@ func (g Generator) placeForkingAcaciaTrunk(c *chunk.Chunk, pos cube.Pos, trunk g
 	return branch, true
 }
 
-func (g Generator) placeTreeFoliage(c *chunk.Chunk, top cube.Pos, leaf gen.BlockState, placer gen.TypedJSONValue, height int, doubleTrunk bool, rng *gen.Xoroshiro128, minY, maxY int) bool {
+func (g Generator) placeTreeFoliage(c *chunk.Chunk, top cube.Pos, leaf gen.BlockState, placer gen.TypedJSONValue, height int, doubleTrunk bool, rng *gen.WorldgenRandom, minY, maxY int) bool {
 	switch placer.Type {
 	case "blob_foliage_placer":
 		var raw struct {
@@ -5362,9 +5362,9 @@ func (g Generator) placeTreeFoliage(c *chunk.Chunk, top cube.Pos, leaf gen.Block
 	}
 }
 
-type treeFoliageSkip func(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool
+type treeFoliageSkip func(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool
 
-func (g Generator) placeTreeLeafRow(c *chunk.Chunk, center cube.Pos, currentRadius, y int, doubleTrunk bool, leaf gen.BlockState, minY, maxY int, rng *gen.Xoroshiro128, skip, signedSkip treeFoliageSkip) {
+func (g Generator) placeTreeLeafRow(c *chunk.Chunk, center cube.Pos, currentRadius, y int, doubleTrunk bool, leaf gen.BlockState, minY, maxY int, rng *gen.WorldgenRandom, skip, signedSkip treeFoliageSkip) {
 	if currentRadius < 0 {
 		return
 	}
@@ -5398,7 +5398,7 @@ func (g Generator) placeTreeLeafRow(c *chunk.Chunk, center cube.Pos, currentRadi
 	}
 }
 
-func (g Generator) placeTreeLeafRowWithHangingBelow(c *chunk.Chunk, center cube.Pos, currentRadius, y int, doubleTrunk bool, leaf gen.BlockState, minY, maxY int, rng *gen.Xoroshiro128, skip treeFoliageSkip, hangingChance, extensionChance float64) {
+func (g Generator) placeTreeLeafRowWithHangingBelow(c *chunk.Chunk, center cube.Pos, currentRadius, y int, doubleTrunk bool, leaf gen.BlockState, minY, maxY int, rng *gen.WorldgenRandom, skip treeFoliageSkip, hangingChance, extensionChance float64) {
 	g.placeTreeLeafRow(c, center, currentRadius, y, doubleTrunk, leaf, minY, maxY, rng, skip, nil)
 	offset := 0
 	if doubleTrunk {
@@ -5445,37 +5445,37 @@ func (g Generator) isSameTreeLeaf(c *chunk.Chunk, pos cube.Pos, leaf gen.BlockSt
 	return strings.TrimPrefix(name, "minecraft:") == strings.TrimPrefix(leaf.Name, "minecraft:")
 }
 
-func blobFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func blobFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	return dx == currentRadius && dz == currentRadius && (rng.NextInt(2) == 0 || y == 0)
 }
 
-func fancyFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func fancyFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	return (float64(dx)+0.5)*(float64(dx)+0.5)+(float64(dz)+0.5)*(float64(dz)+0.5) > float64(currentRadius*currentRadius)
 }
 
-func bushFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func bushFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	return dx == currentRadius && dz == currentRadius && rng.NextInt(2) == 0
 }
 
-func coniferFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func coniferFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	return dx == currentRadius && dz == currentRadius && currentRadius > 0
 }
 
-func acaciaFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func acaciaFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	if y == 0 {
 		return (dx > 1 || dz > 1) && dx != 0 && dz != 0
 	}
 	return dx == currentRadius && dz == currentRadius && currentRadius > 0
 }
 
-func darkOakSignedSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func darkOakSignedSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	if y != 0 || !doubleTrunk {
 		return false
 	}
 	return (dx == -currentRadius || dx >= currentRadius) && (dz == -currentRadius || dz >= currentRadius)
 }
 
-func darkOakFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func darkOakFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	if y == -1 && !doubleTrunk {
 		return dx == currentRadius && dz == currentRadius
 	}
@@ -5485,12 +5485,12 @@ func darkOakFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, dou
 	return false
 }
 
-func megaFoliageSkip(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+func megaFoliageSkip(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 	return dx+dz >= 7 || dx*dx+dz*dz > currentRadius*currentRadius
 }
 
 func cherryFoliageSkip(wideBottomLayerHoleChance, cornerHoleChance float64) treeFoliageSkip {
-	return func(rng *gen.Xoroshiro128, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
+	return func(rng *gen.WorldgenRandom, dx, y, dz, currentRadius int, doubleTrunk bool) bool {
 		if y == -1 && (dx == currentRadius || dz == currentRadius) && rng.NextDouble() < wideBottomLayerHoleChance {
 			return true
 		}
@@ -5600,14 +5600,14 @@ func (g Generator) noiseThresholdProviderValue(provider gen.StateProvider, cfg g
 	key := string(provider.Data)
 	noise, ok := g.featureNoiseCache.Lookup(key)
 	if !ok {
-		rng := gen.NewXoroshiro128FromSeed(cfg.Seed)
-		noise = gen.NewDoublePerlinNoise(&rng, cfg.Noise.Amplitudes, cfg.Noise.FirstOctave)
+		xr := gen.NewXoroshiro128FromSeed(cfg.Seed)
+		noise = gen.NewDoublePerlinNoise(&xr, cfg.Noise.Amplitudes, cfg.Noise.FirstOctave)
 		g.featureNoiseCache.Store(key, noise)
 	}
 	return noise.Sample(float64(pos[0])*cfg.Scale, 0.0, float64(pos[2])*cfg.Scale)
 }
 
-func (g Generator) sampleIntProvider(provider gen.IntProvider, rng *gen.Xoroshiro128) int {
+func (g Generator) sampleIntProvider(provider gen.IntProvider, rng *gen.WorldgenRandom) int {
 	switch provider.Kind {
 	case "constant":
 		if provider.Constant != nil {
@@ -5650,7 +5650,7 @@ func (g Generator) sampleIntProvider(provider gen.IntProvider, rng *gen.Xoroshir
 	return 0
 }
 
-func (g Generator) normalFloat64(rng *gen.Xoroshiro128, mean, deviation float64) float64 {
+func (g Generator) normalFloat64(rng *gen.WorldgenRandom, mean, deviation float64) float64 {
 	u1 := rng.NextDouble()
 	if u1 <= 0 {
 		u1 = math.SmallestNonzeroFloat64
@@ -5681,7 +5681,7 @@ func lerp(t, a, b float64) float64 {
 	return a + (b-a)*t
 }
 
-func (g Generator) signedSpread(rng *gen.Xoroshiro128, spread int) int {
+func (g Generator) signedSpread(rng *gen.WorldgenRandom, spread int) int {
 	if spread <= 0 {
 		return 0
 	}
@@ -5695,15 +5695,12 @@ func (g Generator) positionInChunk(pos cube.Pos, chunkX, chunkZ, minY, maxY int)
 }
 
 func (g Generator) decorationSeed(chunkX, chunkZ int) int64 {
-	rng := gen.NewXoroshiro128FromSeed(g.seed)
-	xScale := int64(rng.NextLong()) | 1
-	zScale := int64(rng.NextLong()) | 1
-	chunkMinX := int64(chunkX * 16)
-	chunkMinZ := int64(chunkZ * 16)
-	return chunkMinX*xScale + chunkMinZ*zScale ^ g.seed
+	rng := gen.NewWorldgenRandomXoroshiro(0)
+	return rng.SetDecorationSeed(g.seed, chunkX*16, chunkZ*16)
 }
 
-func (g Generator) featureRNG(decorationSeed int64, featureIndex int, step gen.GenerationStep) gen.Xoroshiro128 {
-	seed := decorationSeed + int64(featureIndex) + int64(step)*10000
-	return gen.NewXoroshiro128FromSeed(seed)
+func (g Generator) featureRNG(decorationSeed int64, featureIndex int, step gen.GenerationStep) *gen.WorldgenRandom {
+	rng := gen.NewWorldgenRandomXoroshiro(0)
+	rng.SetFeatureSeed(decorationSeed, featureIndex, int(step))
+	return rng
 }

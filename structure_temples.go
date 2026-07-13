@@ -5,7 +5,7 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 )
 
-func (g Generator) buildJungleTempleStructure(startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildJungleTempleStructure(startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	const (
 		width     = 12
 		height    = 10
@@ -47,7 +47,7 @@ func (g Generator) buildJungleTempleStructure(startX, startZ int, surfaceSampler
 	return "jungle_pyramid", []plannedStructurePiece{piece}, piece.bounds, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildJungleTempleBlocks(b *proceduralStructureBuilder, rng *gen.Xoroshiro128) {
+func (g Generator) buildJungleTempleBlocks(b *proceduralStructureBuilder, rng *gen.WorldgenRandom) {
 	air := structureState("air")
 	cobble := structureState("cobblestone")
 	mossy := structureState("mossy_cobblestone")
@@ -225,7 +225,7 @@ func (g Generator) buildJungleTempleBlocks(b *proceduralStructureBuilder, rng *g
 	b.placeChest(9, -3, 10, "south")
 }
 
-func (g Generator) buildDesertPyramidStructure(startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildDesertPyramidStructure(startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	const (
 		width     = 21
 		height    = 15
@@ -268,7 +268,7 @@ func (g Generator) buildDesertPyramidStructure(startX, startZ int, surfaceSample
 	return "desert_pyramid", []plannedStructurePiece{piece}, piece.bounds, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildDesertPyramidBlocks(b *proceduralStructureBuilder, rng *gen.Xoroshiro128, minY int) {
+func (g Generator) buildDesertPyramidBlocks(b *proceduralStructureBuilder, rng *gen.WorldgenRandom, minY int) {
 	sand := structureState("sand")
 	sandstone := structureState("sandstone")
 	cutSandstone := structureState("cut_sandstone")
@@ -463,7 +463,7 @@ func (g Generator) buildDesertPyramidBlocks(b *proceduralStructureBuilder, rng *
 
 func (g Generator) buildDesertPyramidCellar(
 	b *proceduralStructureBuilder,
-	rng *gen.Xoroshiro128,
+	rng *gen.WorldgenRandom,
 	sand, sandstone, cutSandstone, chiseledSandstone, orangeTerracotta, blueTerracotta gen.BlockState,
 ) {
 	sandstoneWest := structureState("sandstone_stairs", "facing", "west")

@@ -492,11 +492,11 @@ func normalizeIdentifierName(name string) string {
 	return name
 }
 
-func randomStructureRotation(rng *gen.Xoroshiro128) structureRotation {
+func randomStructureRotation(rng *gen.WorldgenRandom) structureRotation {
 	return structureRotation(rng.NextInt(4))
 }
 
-func fillShuffledStructureRotations(dst *[4]structureRotation, rng *gen.Xoroshiro128) {
+func fillShuffledStructureRotations(dst *[4]structureRotation, rng *gen.WorldgenRandom) {
 	*dst = [4]structureRotation{
 		structureRotationNone,
 		structureRotationClockwise90,
@@ -775,7 +775,7 @@ func fullBoxQuarterBounds(minValue, maxValue int) (int, int) {
 	return minValue * 4, (maxValue + 1) * 4
 }
 
-func shuffleWithRNG[T any](values []T, rng *gen.Xoroshiro128) {
+func shuffleWithRNG[T any](values []T, rng *gen.WorldgenRandom) {
 	for i := len(values) - 1; i > 0; i-- {
 		j := int(rng.NextInt(uint32(i + 1)))
 		values[i], values[j] = values[j], values[i]
@@ -831,7 +831,7 @@ func precomputePlacedJigsaws(size [3]int, jigsaws []structureJigsaw) [4]precompu
 	return out
 }
 
-func (element resolvedPoolElement) appendShuffledJigsaws(dst []placedStructureJigsaw, origin cube.Pos, rotation structureRotation, rng *gen.Xoroshiro128) []placedStructureJigsaw {
+func (element resolvedPoolElement) appendShuffledJigsaws(dst []placedStructureJigsaw, origin cube.Pos, rotation structureRotation, rng *gen.WorldgenRandom) []placedStructureJigsaw {
 	precomputed := element.rotated[rotation]
 	if len(precomputed.values) == 0 {
 		precomputed = precomputePlacedJigsaws(element.size, element.jigsaws)[rotation]
@@ -871,7 +871,7 @@ func stableSortJigsawsBySelectionPriority(jigsaws []placedStructureJigsaw) {
 	}
 }
 
-func appendShuffledPoolElements(dst []resolvedPoolElement, pool resolvedStructurePool, rng *gen.Xoroshiro128) []resolvedPoolElement {
+func appendShuffledPoolElements(dst []resolvedPoolElement, pool resolvedStructurePool, rng *gen.WorldgenRandom) []resolvedPoolElement {
 	start := len(dst)
 	dst = slices.Grow(dst, len(pool.weighted))
 	dst = dst[:start+len(pool.weighted)]
@@ -934,10 +934,10 @@ func resolveStructurePoolAliases(defs []gen.PoolAliasDef, pos cube.Pos, seed int
 	if len(defs) == 0 {
 		return nil
 	}
-	rng := gen.NewPositionalRandomFactory(seed).At(pos[0], pos[1], pos[2])
+	rng := gen.NewWorldgenRandomFromXoroshiro(gen.NewPositionalRandomFactory(seed).At(pos[0], pos[1], pos[2]))
 	out := make(structurePoolAliasMapping, len(defs))
 	for _, def := range defs {
-		applyStructurePoolAlias(out, def, &rng)
+		applyStructurePoolAlias(out, def, rng)
 	}
 	if len(out) == 0 {
 		return nil
@@ -945,7 +945,7 @@ func resolveStructurePoolAliases(defs []gen.PoolAliasDef, pos cube.Pos, seed int
 	return out
 }
 
-func applyStructurePoolAlias(out structurePoolAliasMapping, def gen.PoolAliasDef, rng *gen.Xoroshiro128) {
+func applyStructurePoolAlias(out structurePoolAliasMapping, def gen.PoolAliasDef, rng *gen.WorldgenRandom) {
 	switch def.Type {
 	case "direct":
 		var raw directPoolAliasDef
@@ -979,7 +979,7 @@ func applyStructurePoolAlias(out structurePoolAliasMapping, def gen.PoolAliasDef
 	}
 }
 
-func weightedStringChoice(entries []weightedTargetDef, rng *gen.Xoroshiro128) string {
+func weightedStringChoice(entries []weightedTargetDef, rng *gen.WorldgenRandom) string {
 	total := 0
 	for _, entry := range entries {
 		if entry.Weight > 0 {
@@ -1002,7 +1002,7 @@ func weightedStringChoice(entries []weightedTargetDef, rng *gen.Xoroshiro128) st
 	return ""
 }
 
-func weightedAliasGroupChoice(entries []weightedAliasGroupDef, rng *gen.Xoroshiro128) []gen.PoolAliasDef {
+func weightedAliasGroupChoice(entries []weightedAliasGroupDef, rng *gen.WorldgenRandom) []gen.PoolAliasDef {
 	total := 0
 	for _, entry := range entries {
 		if entry.Weight > 0 {
@@ -1117,7 +1117,7 @@ func (g Generator) buildPlannedStructure(
 	start weightedStartTemplate,
 	startX, startZ int,
 	surfaceSampler *structureHeightSampler,
-	rng *gen.Xoroshiro128,
+	rng *gen.WorldgenRandom,
 ) ([]plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	rootElement := precomputeResolvedPoolElementJigsaws(resolvedPoolElement{
 		elementType: "start",

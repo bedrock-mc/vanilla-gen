@@ -7,7 +7,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 )
 
-func (g Generator) buildFortressStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildFortressStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	_ = startChunk
 
 	size := [3]int{43, 17, 43}
@@ -134,7 +134,7 @@ func (g Generator) buildFortressStructure(candidate structurePlannerCandidate, s
 	return candidate.structureName, []plannedStructurePiece{piece}, piece.bounds, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildMineshaftStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildMineshaftStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	_ = startChunk
 
 	mesa := candidate.generic.MineshaftType == "mesa" || candidate.structureName == "mineshaft_mesa"

@@ -283,7 +283,7 @@ func (g Generator) buildPlannedDirectStructure(
 	startChunk world.ChunkPos,
 	startX, startZ, surfaceY int,
 	surfaceSampler *structureHeightSampler,
-	rng *gen.Xoroshiro128,
+	rng *gen.WorldgenRandom,
 ) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	switch candidate.structureType {
 	case "igloo":
@@ -321,7 +321,7 @@ func (g Generator) buildPlannedDirectStructure(
 	}
 }
 
-func (g Generator) buildIglooStructure(startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildIglooStructure(startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	position := cube.Pos{startX, 90, startZ}
 	rotation := randomStructureRotation(rng)
 
@@ -362,7 +362,7 @@ func (g Generator) buildIglooStructure(startX, startZ int, surfaceSampler *struc
 	return "igloo/top", pieces, overall, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildShipwreckStructure(def gen.ShipwreckStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildShipwreckStructure(def gen.ShipwreckStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	templates := shipwreckOceanTemplates
 	if def.IsBeached {
 		templates = shipwreckBeachedTemplates
@@ -389,7 +389,7 @@ func (g Generator) buildShipwreckStructure(def gen.ShipwreckStructureDef, startX
 	return templateName, []plannedStructurePiece{piece}, piece.bounds, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildOceanRuinStructure(def gen.OceanRuinStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildOceanRuinStructure(def gen.OceanRuinStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	position := cube.Pos{startX + 8, 90, startZ + 8}
 	rotation := randomStructureRotation(rng)
 	isLarge := rng.NextDouble() <= def.LargeProbability
@@ -434,7 +434,7 @@ func (g Generator) buildOceanRuinStructure(def gen.OceanRuinStructureDef, startX
 	return firstTemplate, pieces, overall, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildRuinedPortalStructure(def gen.RuinedPortalStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildRuinedPortalStructure(def gen.RuinedPortalStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	if len(def.Setups) == 0 {
 		return "", nil, emptyStructureBox(), cube.Pos{}, [3]int{}, false
 	}
@@ -496,7 +496,7 @@ func (g Generator) buildBuriedTreasureStructure(startX, startZ int, surfaceSampl
 	return "buried_treasure", []plannedStructurePiece{piece}, box, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildSwampHutStructure(startChunk world.ChunkPos, startX, startZ, surfaceY int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildSwampHutStructure(startChunk world.ChunkPos, startX, startZ, surfaceY int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	_ = startChunk
 	baseY := surfaceY
 	if baseY < surfaceSampler.minY+1 {
@@ -517,7 +517,7 @@ func (g Generator) buildSwampHutStructure(startChunk world.ChunkPos, startX, sta
 	return "swamp_hut", []plannedStructurePiece{piece}, box, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildNetherFossilStructure(def gen.NetherFossilStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildNetherFossilStructure(def gen.NetherFossilStructureDef, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	blockX := startX + int(rng.NextInt(16))
 	blockZ := startZ + int(rng.NextInt(16))
 	seaLevel := g.metadata.SeaLevel
@@ -674,7 +674,7 @@ func (g Generator) sampleTemplateFloorY(box structureBox, surfaceSampler *struct
 	return surfaceSampler.minY
 }
 
-func chooseRuinedPortalSetup(setups []gen.RuinedPortalSetupDef, rng *gen.Xoroshiro128) gen.RuinedPortalSetupDef {
+func chooseRuinedPortalSetup(setups []gen.RuinedPortalSetupDef, rng *gen.WorldgenRandom) gen.RuinedPortalSetupDef {
 	total := 0.0
 	for _, setup := range setups {
 		if setup.Weight > 0 {
@@ -697,7 +697,7 @@ func chooseRuinedPortalSetup(setups []gen.RuinedPortalSetupDef, rng *gen.Xoroshi
 	return setups[0]
 }
 
-func ruinedPortalTargetY(placement string, surfaceY, ySpan, minY, maxY int, rng *gen.Xoroshiro128) int {
+func ruinedPortalTargetY(placement string, surfaceY, ySpan, minY, maxY int, rng *gen.WorldgenRandom) int {
 	switch placement {
 	case "in_mountain":
 		return randomBetweenInclusive(rng, 70, max(70, surfaceY-ySpan))
@@ -716,14 +716,14 @@ func ruinedPortalTargetY(placement string, surfaceY, ySpan, minY, maxY int, rng 
 	}
 }
 
-func randomBetweenInclusive(rng *gen.Xoroshiro128, minValue, maxValue int) int {
+func randomBetweenInclusive(rng *gen.WorldgenRandom, minValue, maxValue int) int {
 	if maxValue <= minValue {
 		return minValue
 	}
 	return minValue + int(rng.NextInt(uint32(maxValue-minValue+1)))
 }
 
-func (g Generator) buildOceanRuinPieces(def gen.OceanRuinStructureDef, position cube.Pos, rotation structureRotation, isLarge bool, baseIntegrity float64, rng *gen.Xoroshiro128) ([]plannedStructurePiece, string, bool) {
+func (g Generator) buildOceanRuinPieces(def gen.OceanRuinStructureDef, position cube.Pos, rotation structureRotation, isLarge bool, baseIntegrity float64, rng *gen.WorldgenRandom) ([]plannedStructurePiece, string, bool) {
 	switch def.BiomeTemp {
 	case "warm":
 		templates := oceanRuinWarmTemplates
@@ -803,7 +803,7 @@ func oceanRuinProcessors(integrity float64, warm bool) []structureProcessor {
 	return processors
 }
 
-func oceanRuinClusterPositions(origin cube.Pos, rotation structureRotation, rng *gen.Xoroshiro128) []cube.Pos {
+func oceanRuinClusterPositions(origin cube.Pos, rotation structureRotation, rng *gen.WorldgenRandom) []cube.Pos {
 	parentPos := cube.Pos{origin[0], 90, origin[2]}
 	parentCorner := structureTemplateWorldPos(parentPos, [3]int{15, 0, 15}, rotation, structureMirrorNone, cube.Pos{})
 	parentBottomLeft := cube.Pos{min(parentPos[0], parentCorner[0]), parentPos[1], min(parentPos[2], parentCorner[2])}

@@ -26,7 +26,7 @@ func (g Generator) oceanMonumentSurroundingsAllowAt(centerX, centerZ, sampleY in
 	return true
 }
 
-func (g Generator) buildOceanMonumentStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildOceanMonumentStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	_ = candidate
 	_ = startChunk
 
@@ -129,7 +129,7 @@ func (g Generator) buildOceanMonumentStructure(candidate structurePlannerCandida
 	return "monument", []plannedStructurePiece{piece}, piece.bounds, rootOrigin, rootSize, true
 }
 
-func (g Generator) buildWoodlandMansionStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildWoodlandMansionStructure(candidate structurePlannerCandidate, startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	_ = candidate
 	_ = startChunk
 

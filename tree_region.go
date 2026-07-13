@@ -157,7 +157,7 @@ func (g Generator) runPlacedFeatureWithRegion(region *treeDecorationRegion, step
 	decorationSeed := g.decorationSeed(region.centerChunkX, region.centerChunkZ)
 	origin := cube.Pos{region.centerChunkX * 16, region.minY, region.centerChunkZ * 16}
 	rng := g.featureRNG(decorationSeed, featureIndex, step)
-	positions, ok := g.applyPlacementModifiers(centerSlot.chunk, centerSlot.biomes, []cube.Pos{origin}, placed.Placement, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, &rng)
+	positions, ok := g.applyPlacementModifiers(centerSlot.chunk, centerSlot.biomes, []cube.Pos{origin}, placed.Placement, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, rng)
 	if !ok {
 		return
 	}
@@ -168,7 +168,7 @@ func (g Generator) runPlacedFeatureWithRegion(region *treeDecorationRegion, step
 		if regionMargin > 0 && needsDecorationRegionForPos(pos, region.centerChunkX, region.centerChunkZ, regionMargin) {
 			executor.activeTreeRegion = region
 		}
-		executor.executeConfiguredFeature(centerSlot.chunk, centerSlot.biomes, pos, placed.Feature, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, &rng, 0)
+		executor.executeConfiguredFeature(centerSlot.chunk, centerSlot.biomes, pos, placed.Feature, featureName, region.centerChunkX, region.centerChunkZ, region.minY, region.maxY, rng, 0)
 	}
 }
 
@@ -199,7 +199,7 @@ func (g Generator) runPlacedTreeFeatureAcrossRegion(region *treeDecorationRegion
 				sourceChunkZ,
 				region.minY,
 				region.maxY,
-				&rng,
+				rng,
 			)
 			if !ok {
 				continue
@@ -215,7 +215,7 @@ func (g Generator) runPlacedTreeFeatureAcrossRegion(region *treeDecorationRegion
 					sourceChunkZ,
 					region.minY,
 					region.maxY,
-					&rng,
+					rng,
 					0,
 				)
 			}

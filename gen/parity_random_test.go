@@ -75,24 +75,16 @@ func TestLegacyRandomMatchesJava(t *testing.T) {
 	}
 }
 
-func setDecorationSeedLegacy(r *LegacyRandom, levelSeed int64, minBlockX, minBlockZ int) int64 {
-	r.SetSeed(levelSeed)
-	a := r.NextLong() | 1
-	b := r.NextLong() | 1
-	seed := int64(minBlockX)*a + int64(minBlockZ)*b ^ levelSeed
-	r.SetSeed(seed)
-	return seed
-}
 
 func TestWorldgenRandomLegacyMatchesJava(t *testing.T) {
 	fx := loadRandomFixture(t)
 
-	var rng LegacyRandom
-	dec := setDecorationSeedLegacy(&rng, 1, 16, 32)
+	rng := NewWorldgenRandomLegacy(0)
+	dec := rng.SetDecorationSeed(1, 16, 32)
 	if dec != fx.WorldgenLegacy.DecorationSeed {
 		t.Fatalf("decoration seed = %d, want %d", dec, fx.WorldgenLegacy.DecorationSeed)
 	}
-	rng.SetSeed(dec + 5 + 10000*3)
+	rng.SetFeatureSeed(dec, 5, 3)
 	for i, want := range fx.WorldgenLegacy.FeatureNextInt {
 		if got := int64(rng.NextInt(16)); got != want {
 			t.Fatalf("feature nextInt[%d] = %d, want %d", i, got, want)
@@ -103,16 +95,14 @@ func TestWorldgenRandomLegacyMatchesJava(t *testing.T) {
 func TestWorldgenRandomXoroshiroMatchesJava(t *testing.T) {
 	fx := loadRandomFixture(t)
 
-	rng := NewXoroshiro128FromSeed(1)
-	a := int64(rng.NextLong()) | 1
-	b := int64(rng.NextLong()) | 1
-	dec := 16*a + 32*b ^ 1
+	rng := NewWorldgenRandomXoroshiro(0)
+	dec := rng.SetDecorationSeed(1, 16, 32)
 	if dec != fx.WorldgenXoroshiro.DecorationSeed {
 		t.Fatalf("decoration seed = %d, want %d", dec, fx.WorldgenXoroshiro.DecorationSeed)
 	}
-	feature := NewXoroshiro128FromSeed(dec + 5 + 10000*3)
+	rng.SetFeatureSeed(dec, 5, 3)
 	for i, want := range fx.WorldgenXoroshiro.FeatureNextInt {
-		if got := int64(feature.NextInt(16)); got != want {
+		if got := int64(rng.NextInt(16)); got != want {
 			t.Fatalf("feature nextInt[%d] = %d, want %d", i, got, want)
 		}
 	}

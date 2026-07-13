@@ -474,7 +474,7 @@ func (g Generator) placeStructuresForStep(c *chunk.Chunk, biomes sourceBiomeVolu
 	for _, entry := range g.structureStepOrder[step] {
 		planner := g.structurePlanners[entry.plannerIndex]
 		rng := g.featureRNG(decorationSeed, entry.structureIndex, step)
-		g.placePlannerStructureForStepEntry(c, biomes, chunkX, chunkZ, minY, maxY, planner, entry, surfaceSampler, &rng)
+		g.placePlannerStructureForStepEntry(c, biomes, chunkX, chunkZ, minY, maxY, planner, entry, surfaceSampler, rng)
 	}
 }
 
@@ -487,7 +487,7 @@ func (g Generator) placeStructureSet(c *chunk.Chunk, biomes sourceBiomeVolume, c
 func (g Generator) placeStructureSetForStep(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, planner structurePlanner, step gen.GenerationStep, surfaceSampler *structureHeightSampler) {
 	for _, entry := range g.structureEntriesForPlannerStep(planner, step) {
 		rng := g.featureRNG(g.decorationSeed(chunkX, chunkZ), entry.structureIndex, step)
-		g.placePlannerStructureForStepEntry(c, biomes, chunkX, chunkZ, minY, maxY, planner, entry, surfaceSampler, &rng)
+		g.placePlannerStructureForStepEntry(c, biomes, chunkX, chunkZ, minY, maxY, planner, entry, surfaceSampler, rng)
 	}
 }
 
@@ -525,7 +525,7 @@ func (g Generator) structureEntriesForPlannerStep(planner structurePlanner, step
 	return entries
 }
 
-func (g Generator) placePlannerStructureForStepEntry(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, planner structurePlanner, entry structureStepEntry, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) {
+func (g Generator) placePlannerStructureForStepEntry(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, planner structurePlanner, entry structureStepEntry, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) {
 	for _, startChunk := range g.plannerPotentialStartChunksNearChunk(planner, chunkX, chunkZ, 0, 0) {
 		start, ok := g.planStructureStart(planner, startChunk, minY, maxY, surfaceSampler)
 		if !ok || !structureIntersectsChunk(start, chunkX, chunkZ, minY, maxY) {
@@ -658,15 +658,15 @@ func (g Generator) planStructureStart(planner structurePlanner, startChunk world
 		okBuild       bool
 	)
 	if candidate.structureType == "jigsaw" {
-		startTemplate, ok := chooseStartTemplate(candidate, &rng)
+		startTemplate, ok := chooseStartTemplate(candidate, rng)
 		if !ok {
 			g.structureStarts.Store(cacheKey, plannedStructureStart{}, false)
 			return plannedStructureStart{}, false
 		}
 		templateName = startTemplate.name
-		pieces, overallBounds, rootOrigin, rootSize, okBuild = g.buildPlannedStructure(candidate, startTemplate, startX, startZ, surfaceSampler, &rng)
+		pieces, overallBounds, rootOrigin, rootSize, okBuild = g.buildPlannedStructure(candidate, startTemplate, startX, startZ, surfaceSampler, rng)
 	} else {
-		templateName, pieces, overallBounds, rootOrigin, rootSize, okBuild = g.buildPlannedDirectStructure(candidate, planner.randomPlacement, startChunk, startX, startZ, surfaceY, surfaceSampler, &rng)
+		templateName, pieces, overallBounds, rootOrigin, rootSize, okBuild = g.buildPlannedDirectStructure(candidate, planner.randomPlacement, startChunk, startX, startZ, surfaceY, surfaceSampler, rng)
 	}
 	if !okBuild || len(pieces) == 0 {
 		g.structureStarts.Store(cacheKey, plannedStructureStart{}, false)
@@ -768,7 +768,7 @@ func (g Generator) structurePlanningAllowedAt(candidate structurePlannerCandidat
 	}
 }
 
-func chooseStartTemplate(candidate structurePlannerCandidate, rng *gen.Xoroshiro128) (weightedStartTemplate, bool) {
+func chooseStartTemplate(candidate structurePlannerCandidate, rng *gen.WorldgenRandom) (weightedStartTemplate, bool) {
 	if candidate.totalTemplateWeight <= 0 {
 		return weightedStartTemplate{}, false
 	}
@@ -786,7 +786,7 @@ func chooseStartTemplate(candidate structurePlannerCandidate, rng *gen.Xoroshiro
 	return weightedStartTemplate{}, false
 }
 
-func (g Generator) resolveJigsawStartY(def gen.JigsawStructureDef, blockX, blockZ, minY, maxY int, rng *gen.Xoroshiro128) int {
+func (g Generator) resolveJigsawStartY(def gen.JigsawStructureDef, blockX, blockZ, minY, maxY int, rng *gen.WorldgenRandom) int {
 	base := g.sampleStructureHeightProvider(def.StartHeight, minY, maxY, rng)
 	if def.ProjectStartToHeight != "" {
 		return g.worldSurfaceLevelAt(blockX, blockZ, minY, maxY) + base
@@ -794,7 +794,7 @@ func (g Generator) resolveJigsawStartY(def gen.JigsawStructureDef, blockX, block
 	return base
 }
 
-func (g Generator) sampleStructureHeightProvider(provider gen.StructureHeightProvider, minY, maxY int, rng *gen.Xoroshiro128) int {
+func (g Generator) sampleStructureHeightProvider(provider gen.StructureHeightProvider, minY, maxY int, rng *gen.WorldgenRandom) int {
 	switch provider.Kind {
 	case "constant":
 		return resolveVerticalAnchor(provider.Anchor, minY, maxY)
@@ -840,7 +840,7 @@ func structureIntersectsChunk(start plannedStructureStart, chunkX, chunkZ, minY,
 	}.intersectsChunk(chunkX, chunkZ, minY, maxY)
 }
 
-func (g Generator) placePlannedStructure(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, start plannedStructureStart, structureRNG *gen.Xoroshiro128) {
+func (g Generator) placePlannedStructure(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, start plannedStructureStart, structureRNG *gen.WorldgenRandom) {
 	for _, piece := range start.pieces {
 		if !piece.bounds.intersectsChunk(chunkX, chunkZ, minY, maxY) {
 			continue
@@ -883,7 +883,7 @@ func (g Generator) placePlannedStructure(c *chunk.Chunk, biomes sourceBiomeVolum
 			featureRNG := structureRNG
 			if featureRNG == nil {
 				rng := g.structureFeatureRNG(start.structureName, feature.featureName, piece.origin)
-				featureRNG = &rng
+				featureRNG = rng
 			}
 			_ = g.executePlacedFeatureRef(
 				c,
@@ -968,20 +968,20 @@ func templateBlockCacheKey(name string, properties map[string]any) string {
 	return fmt.Sprintf("%s#%x", name, h.Sum64())
 }
 
-func (g Generator) structureRNG(name string, pos world.ChunkPos) gen.Xoroshiro128 {
+func (g Generator) structureRNG(name string, pos world.ChunkPos) *gen.WorldgenRandom {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(name))
 	seed := int64(h.Sum64()) ^ g.seed ^ int64(pos[0])*341873128712 ^ int64(pos[1])*132897987541
-	return gen.NewXoroshiro128FromSeed(seed)
+	return gen.NewWorldgenRandomXoroshiro(seed)
 }
 
-func (g Generator) structureFeatureRNG(structureName, featureName string, pos cube.Pos) gen.Xoroshiro128 {
+func (g Generator) structureFeatureRNG(structureName, featureName string, pos cube.Pos) *gen.WorldgenRandom {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(structureName))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(featureName))
 	seed := int64(h.Sum64()) ^ g.seed ^ int64(pos[0])*341873128712 ^ int64(pos[1])*132897987541 ^ int64(pos[2])*42317861
-	return gen.NewXoroshiro128FromSeed(seed)
+	return gen.NewWorldgenRandomXoroshiro(seed)
 }
 
 func randomSpreadPotentialChunk(seed int64, placement gen.RandomSpreadPlacement, gridX, gridZ int) world.ChunkPos {

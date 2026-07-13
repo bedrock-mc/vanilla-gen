@@ -7,7 +7,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 )
 
-func (g Generator) buildStrongholdStructure(startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.Xoroshiro128) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
+func (g Generator) buildStrongholdStructure(startChunk world.ChunkPos, startX, startZ int, surfaceSampler *structureHeightSampler, rng *gen.WorldgenRandom) (string, []plannedStructurePiece, structureBox, cube.Pos, [3]int, bool) {
 	_ = startChunk
 
 	size := [3]int{37, 13, 45}
@@ -206,7 +206,7 @@ func endPortalFrameState(facing cube.Direction, eye bool) gen.BlockState {
 	}
 }
 
-func strongholdRandomStoneState(rng *gen.Xoroshiro128, normal, mossy, cracked gen.BlockState) gen.BlockState {
+func strongholdRandomStoneState(rng *gen.WorldgenRandom, normal, mossy, cracked gen.BlockState) gen.BlockState {
 	switch roll := int(rng.NextInt(100)); {
 	case roll < 55:
 		return normal

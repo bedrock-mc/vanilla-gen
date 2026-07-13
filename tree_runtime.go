@@ -37,7 +37,7 @@ type treeRuntime struct {
 	g      Generator
 	c      *chunk.Chunk
 	cfg    gen.TreeConfig
-	rng    *gen.Xoroshiro128
+	rng    *gen.WorldgenRandom
 	minY   int
 	maxY   int
 	chunkX int
@@ -53,7 +53,7 @@ type treeRuntime struct {
 	decorations treePlacementRecord
 }
 
-func newTreeRuntime(g Generator, c *chunk.Chunk, origin cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.Xoroshiro128) treeRuntime {
+func newTreeRuntime(g Generator, c *chunk.Chunk, origin cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.WorldgenRandom) treeRuntime {
 	chunkX := floorDiv(origin[0], 16)
 	chunkZ := floorDiv(origin[2], 16)
 	return treeRuntime{
@@ -144,11 +144,11 @@ func (d treeDirection) opposite() treeDirection {
 	}
 }
 
-func randomTreeDirection(rng *gen.Xoroshiro128) treeDirection {
+func randomTreeDirection(rng *gen.WorldgenRandom) treeDirection {
 	return treeDirection(rng.NextInt(4))
 }
 
-func (g Generator) executeJavaTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.Xoroshiro128) bool {
+func (g Generator) executeJavaTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.WorldgenRandom) bool {
 	rt := newTreeRuntime(g, c, pos, cfg, minY, maxY, rng)
 
 	treeHeight, _ := sampleTreeHeight(cfg.TrunkPlacer, rng)
@@ -192,7 +192,7 @@ func (g Generator) executeJavaTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeCon
 	return true
 }
 
-func (g Generator) treeTrunkOrigin(cfg gen.TreeConfig, origin cube.Pos, rng *gen.Xoroshiro128) cube.Pos {
+func (g Generator) treeTrunkOrigin(cfg gen.TreeConfig, origin cube.Pos, rng *gen.WorldgenRandom) cube.Pos {
 	if cfg.RootPlacer.Type == "" {
 		return origin
 	}
@@ -218,7 +218,7 @@ func treeTrunkCanGrowThroughTag(placer gen.TypedJSONValue) string {
 	return raw.CanGrowThrough
 }
 
-func (g Generator) treeFoliageHeight(placer gen.TypedJSONValue, rng *gen.Xoroshiro128, treeHeight int, cfg gen.TreeConfig) int {
+func (g Generator) treeFoliageHeight(placer gen.TypedJSONValue, rng *gen.WorldgenRandom, treeHeight int, cfg gen.TreeConfig) int {
 	switch placer.Type {
 	case "blob_foliage_placer", "fancy_foliage_placer", "bush_foliage_placer":
 		var raw struct {
@@ -286,7 +286,7 @@ func (g Generator) treeFoliageHeight(placer gen.TypedJSONValue, rng *gen.Xoroshi
 	}
 }
 
-func (g Generator) treeFoliageRadius(placer gen.TypedJSONValue, rng *gen.Xoroshiro128, trunkHeight int) int {
+func (g Generator) treeFoliageRadius(placer gen.TypedJSONValue, rng *gen.WorldgenRandom, trunkHeight int) int {
 	var raw struct {
 		Radius gen.IntProvider `json:"radius"`
 	}
@@ -485,7 +485,7 @@ func (rt *treeRuntime) placeBelowTrunkBlock(pos cube.Pos) {
 	}
 }
 
-func (g Generator) selectTreeBelowTrunkState(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, rng *gen.Xoroshiro128, minY, maxY int) (gen.BlockState, bool) {
+func (g Generator) selectTreeBelowTrunkState(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, rng *gen.WorldgenRandom, minY, maxY int) (gen.BlockState, bool) {
 	if cfg.BelowTrunkProvider.Type != "" {
 		return g.selectState(c, cfg.BelowTrunkProvider, pos, rng, minY, maxY)
 	}
@@ -1984,14 +1984,14 @@ func (rt treeRuntime) chunkForPos(pos cube.Pos) (*chunk.Chunk, bool) {
 	return rt.c, true
 }
 
-func treeShuffle[T any](rng *gen.Xoroshiro128, values []T) {
+func treeShuffle[T any](rng *gen.WorldgenRandom, values []T) {
 	for i := len(values) - 1; i > 0; i-- {
 		j := int(rng.NextInt(uint32(i + 1)))
 		values[i], values[j] = values[j], values[i]
 	}
 }
 
-func treeRandomBetweenInclusive(rng *gen.Xoroshiro128, minV, maxV int) int {
+func treeRandomBetweenInclusive(rng *gen.WorldgenRandom, minV, maxV int) int {
 	if maxV <= minV {
 		return minV
 	}
