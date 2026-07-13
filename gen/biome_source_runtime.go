@@ -38,14 +38,10 @@ type endBiomeSource struct {
 	cache   sync.Map
 }
 
-type biomeCoordKey struct {
-	x int
-	y int
-	z int
-}
-
-func biomeCacheKey(x, y, z int) biomeCoordKey {
-	return biomeCoordKey{x: x >> 2, y: y >> 2, z: z >> 2}
+// biomeCacheKey packs quart coordinates into one int64 for cheap hashing on
+// the hot biome lookup path.
+func biomeCacheKey(x, y, z int) int64 {
+	return int64(x>>2)&0x1FFFFF<<42 | int64(y>>2)&0x1FFFFF<<21 | int64(z>>2)&0x1FFFFF
 }
 
 type climateParameter struct {

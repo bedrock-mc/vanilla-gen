@@ -1,6 +1,9 @@
 package gen
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 type FunctionContext struct {
 	BlockX int
@@ -121,6 +124,8 @@ type Graph struct {
 	InnerToCache2D []int
 	FlatCacheOrder []int
 	Cache2DOrder   []int
+
+	scratchPool sync.Pool
 }
 
 type FlatCacheGrid struct {
@@ -223,7 +228,13 @@ func (g *Graph) NewColumnContext(blockX, blockZ int, noises NoiseSource, flat *F
 
 func (g *Graph) Eval(root int, ctx FunctionContext, noises NoiseSource, flat *FlatCacheGrid, col *ColumnContext, scratch *EvalScratch) float64 {
 	if scratch == nil {
-		scratch = NewEvalScratch(g)
+		pooled := g.scratchPool.Get()
+		if pooled == nil {
+			scratch = NewEvalScratch(g)
+		} else {
+			scratch = pooled.(*EvalScratch)
+		}
+		defer g.scratchPool.Put(scratch)
 	}
 	scratch.reset()
 	return g.evalNormal(root, ctx, noises, flat, col, scratch)
@@ -256,7 +267,8 @@ func (g *Graph) evalNormal(idx int, ctx FunctionContext, noises NoiseSource, fla
 	var value float64
 	if node.Op == OpFindTopSurface {
 		upper := int(math.Floor(g.evalNormal(node.Dep1, ctx, noises, flat, col, scratch)))
-		innerScratch := NewEvalScratch(g)
+		innerScratch := g.pooledScratch()
+		defer g.scratchPool.Put(innerScratch)
 		value = FindTopSurface(ctx.BlockX, ctx.BlockZ, node.LowerBound, upper, node.CellHeight, func(y int) float64 {
 			innerScratch.reset()
 			innerCtx := ctx
@@ -291,7 +303,8 @@ func (g *Graph) evalFlat(idx int, ctx FunctionContext, noises NoiseSource, flatV
 		value = g.evalFlat(node.Dep0, ctx, noises, flatValues, scratch)
 	case OpFindTopSurface:
 		upper := int(math.Floor(g.evalFlat(node.Dep1, ctx, noises, flatValues, scratch)))
-		innerScratch := NewEvalScratch(g)
+		innerScratch := g.pooledScratch()
+		defer g.scratchPool.Put(innerScratch)
 		value = FindTopSurface(ctx.BlockX, ctx.BlockZ, node.LowerBound, upper, node.CellHeight, func(y int) float64 {
 			innerScratch.reset()
 			innerCtx := ctx
@@ -336,7 +349,8 @@ func (g *Graph) evalColumn(idx int, ctx FunctionContext, noises NoiseSource, fla
 		value = g.evalColumn(node.Dep0, ctx, noises, flat, values, computed, scratch)
 	case OpFindTopSurface:
 		upper := int(math.Floor(g.evalColumn(node.Dep1, ctx, noises, flat, values, computed, scratch)))
-		innerScratch := NewEvalScratch(g)
+		innerScratch := g.pooledScratch()
+		defer g.scratchPool.Put(innerScratch)
 		value = FindTopSurface(ctx.BlockX, ctx.BlockZ, node.LowerBound, upper, node.CellHeight, func(y int) float64 {
 			innerScratch.reset()
 			innerCtx := ctx
@@ -610,4 +624,11 @@ func maxFloat(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+func (g *Graph) pooledScratch() *EvalScratch {
+	if pooled := g.scratchPool.Get(); pooled != nil {
+		return pooled.(*EvalScratch)
+	}
+	return NewEvalScratch(g)
 }

@@ -1,6 +1,7 @@
 package vanilla
 
 import (
+	"sync/atomic"
 	"fmt"
 	"sync"
 	"unsafe"
@@ -143,6 +144,7 @@ func (g Generator) Seed() int64 {
 
 func sharedStructureResources() (*gen.WorldgenRegistry, *gen.StructureTemplateRegistry, *structureResolver) {
 	sharedWorldgenOnce.Do(func() {
+		initBiomeSwap()
 		sharedWorldgenRegistry = gen.NewWorldgenRegistry()
 		sharedStructureRegistry = gen.NewStructureTemplateRegistry(sharedWorldgenRegistry)
 		sharedStructureResolver = newStructureResolver(sharedWorldgenRegistry, sharedStructureRegistry)
@@ -178,7 +180,7 @@ func (g Generator) prepareChunkForDecoration(pos world.ChunkPos, c *chunk.Chunk)
 	// neighbouring chunk's region replay, so it is cached and copied.
 	if g.protoChunks != nil {
 		if cached, biomes, ok := g.protoChunks.get(chunkX, chunkZ); ok {
-			copyChunkInto(c, cached, minY, maxY)
+			adoptChunkContents(c, cached, minY, maxY)
 			return biomes, chunkX, chunkZ, minY, maxY
 		}
 	}
@@ -393,28 +395,56 @@ func (c *blockRIDCache) Store(key blockStateKey, rid uint32) {
 	c.byKey[key] = rid
 }
 
+// runtimeIDNameCache is a dense, lock-free runtime-id -> block name table;
+// this lookup sits on the hot path of every carver and feature block test.
 type runtimeIDNameCache struct {
-	mu    sync.RWMutex
-	byRID map[uint32]string
+	mu    sync.Mutex
+	names atomic.Pointer[[]string]
 }
 
+// runtimeIDNameUnknown marks a cached lookup miss ("" is a valid miss value).
+const runtimeIDNameUnknown = "\x00"
+
 func newRuntimeIDNameCache() *runtimeIDNameCache {
-	return &runtimeIDNameCache{byRID: make(map[uint32]string)}
+	c := &runtimeIDNameCache{}
+	empty := make([]string, 0)
+	c.names.Store(&empty)
+	return c
 }
 
 func (c *runtimeIDNameCache) Lookup(rid uint32) (string, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	name, ok := c.byRID[rid]
-	return name, ok
+	table := *c.names.Load()
+	if int(rid) < len(table) && table[rid] != "" {
+		if table[rid] == runtimeIDNameUnknown {
+			return "", true
+		}
+		return table[rid], true
+	}
+	return "", false
 }
 
 func (c *runtimeIDNameCache) Store(rid uint32, name string) {
+	if name == "" {
+		name = runtimeIDNameUnknown
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	c.byRID[rid] = name
+	old := *c.names.Load()
+	if int(rid) < len(old) {
+		if old[rid] == name {
+			return
+		}
+		table := make([]string, len(old))
+		copy(table, old)
+		table[rid] = name
+		c.names.Store(&table)
+		return
+	}
+	size := int(rid) + 1024
+	table := make([]string, size)
+	copy(table, old)
+	table[rid] = name
+	c.names.Store(&table)
 }
 
 type stringRIDCache struct {

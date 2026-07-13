@@ -477,26 +477,18 @@ func smoothstep(d float64) float64 {
 	return d * d * d * (d*(d*6-15) + 10)
 }
 
+// perlinGradients is SimplexNoise.GRADIENT; gradDot computes the exact
+// vanilla dot product (branchless, including the +0*coordinate term).
+var perlinGradients = [16][3]float64{
+	{1, 1, 0}, {-1, 1, 0}, {1, -1, 0}, {-1, -1, 0},
+	{1, 0, 1}, {-1, 0, 1}, {1, 0, -1}, {-1, 0, -1},
+	{0, 1, 1}, {0, -1, 1}, {0, 1, -1}, {0, -1, -1},
+	{1, 1, 0}, {0, -1, 1}, {-1, 1, 0}, {0, -1, -1},
+}
+
 func indexedLerp(idx int32, x, y, z float64) float64 {
-	u := y
-	if idx < 8 {
-		u = x
-	}
-	var v float64
-	if idx < 4 {
-		v = y
-	} else if idx == 12 || idx == 14 {
-		v = x
-	} else {
-		v = z
-	}
-	if idx&1 != 0 {
-		u = -u
-	}
-	if idx&2 != 0 {
-		v = -v
-	}
-	return u + v
+	g := &perlinGradients[idx&15]
+	return g[0]*x + g[1]*y + g[2]*z
 }
 
 func lerp(t, a, b float64) float64 {

@@ -1,8 +1,12 @@
 package vanilla
 
 import (
+	"reflect"
 	"sync"
+	"unsafe"
 
+	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 )
 
@@ -77,4 +81,51 @@ func (c *xzIntCache) store(x, z, v int) {
 	c.mu.Lock()
 	c.byPos[[2]int{x, z}] = v
 	c.mu.Unlock()
+}
+
+// adoptChunkContents transplants the block sub-chunks and biome storage of a
+// throwaway clone into dst, avoiding ~100k palette writes per cache hit. The
+// biome slice is unexported in Dragonfly, so it is swapped via a
+// reflect-derived offset that is verified once at startup; on verification
+// failure we fall back to block-by-block copying.
+func adoptChunkContents(dst, src *chunk.Chunk, minY, maxY int) {
+	copy(dst.Sub(), src.Sub())
+	if biomeSwapOK {
+		srcBiomes := chunkBiomesSlice(src)
+		dstBiomes := chunkBiomesSlice(dst)
+		copy(*dstBiomes, *srcBiomes)
+		return
+	}
+	for x := uint8(0); x < 16; x++ {
+		for z := uint8(0); z < 16; z++ {
+			for y := minY; y <= maxY; y++ {
+				dst.SetBiome(x, int16(y), z, src.Biome(x, int16(y), z))
+			}
+		}
+	}
+}
+
+var (
+	biomesFieldOffset uintptr
+	biomeSwapOK       bool
+)
+
+func chunkBiomesSlice(c *chunk.Chunk) *[]*chunk.PalettedStorage {
+	return (*[]*chunk.PalettedStorage)(unsafe.Pointer(uintptr(unsafe.Pointer(c)) + biomesFieldOffset))
+}
+
+func initBiomeSwap() {
+	t := reflect.TypeOf(chunk.Chunk{})
+	field, ok := t.FieldByName("biomes")
+	if !ok || field.Type != reflect.TypeOf([]*chunk.PalettedStorage(nil)) {
+		return
+	}
+	biomesFieldOffset = field.Offset
+
+	// Verify against the real accessors before trusting the offset.
+	a := chunk.New(world.DefaultBlockRegistry, cube.Range{-64, 319})
+	b := chunk.New(world.DefaultBlockRegistry, cube.Range{-64, 319})
+	a.SetBiome(3, 100, 5, 7)
+	copy(*chunkBiomesSlice(b), *chunkBiomesSlice(a))
+	biomeSwapOK = b.Biome(3, 100, 5) == 7
 }
