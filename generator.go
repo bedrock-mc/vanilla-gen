@@ -257,10 +257,9 @@ func (g Generator) prepareChunkForDecoration(pos world.ChunkPos, c *chunk.Chunk)
 // caches and registries internally.
 func (g Generator) ConcurrentChunkGeneration() bool { return true }
 
-func (g Generator) baseRuntimeID(y int) uint32 {
-	if g.dimension == world.Overworld && y < 0 {
-		return g.deepRID
-	}
+// baseRuntimeID returns the dimension default block; vanilla fills the whole
+// noise terrain with it and deepslate comes from the surface rule gradient.
+func (g Generator) baseRuntimeID(int) uint32 {
 	return g.defaultBlockRID
 }
 

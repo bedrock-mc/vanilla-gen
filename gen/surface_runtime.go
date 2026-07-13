@@ -1,6 +1,9 @@
 package gen
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 const surfaceNoWaterHeight = -1 << 31
 
@@ -22,14 +25,48 @@ type SurfaceContext struct {
 }
 
 type SurfaceRuntime struct {
-	seed                  int64
-	noises                *NoiseRegistry
-	biomeSource           BiomeSource
-	surfaceNoise          DoublePerlinNoise
-	surfaceSecondaryNoise DoublePerlinNoise
-	rule                  *surfaceRule
-	useBandlands          bool
-	bandlands             surfaceBandlands
+	seed              int64
+	seaLevel          int
+	noises            *NoiseRegistry
+	biomeSource       BiomeSource
+	noiseRandom       PositionalRandomFactory
+	gradientMu        sync.Mutex
+	gradientFactories map[string]PositionalRandomFactory
+	rule              *surfaceRule
+	useBandlands      bool
+	bandlands         surfaceBandlands
+}
+
+// NoiseRandomAt exposes the SurfaceSystem noiseRandom positional factory.
+func (s *SurfaceRuntime) NoiseRandomAt(x, y, z int) Xoroshiro128 {
+	return s.noiseRandom.At(x, y, z)
+}
+
+// namedRandomFactory mirrors RandomState.getOrCreateRandomFactory.
+func (s *SurfaceRuntime) namedRandomFactory(name string) PositionalRandomFactory {
+	s.gradientMu.Lock()
+	defer s.gradientMu.Unlock()
+	if factory, ok := s.gradientFactories[name]; ok {
+		return factory
+	}
+	rng := s.noiseRandom.FromHashOf(name)
+	factory := NewPositionalRandomFactoryFromSeeds(int64(rng.NextLong()), int64(rng.NextLong()))
+	s.gradientFactories[name] = factory
+	return factory
+}
+
+// gradientRandomName recovers the vanilla random_name for the vertical
+// gradient conditions; the generated rule data dropped the name but the three
+// vanilla gradients are uniquely identified by their anchor kinds.
+func gradientRandomName(condition *surfaceCondition) string {
+	switch condition.trueAtAndBelow.kind {
+	case surfaceAnchorAboveBottom:
+		return "minecraft:bedrock_floor"
+	case surfaceAnchorBelowTop:
+		return "minecraft:bedrock_roof"
+	default:
+		return "minecraft:deepslate"
+	}
 }
 
 type surfaceRuntimeLookup func(name string, properties map[string]string) uint32
@@ -129,44 +166,48 @@ type surfaceRule struct {
 }
 
 type surfaceBandlands struct {
-	bands       [192]surfaceBlockState
-	offsetNoise DoublePerlinNoise
+	bands [192]surfaceBlockState
 }
 
-func NewSurfaceRuntime(seed int64, noises *NoiseRegistry, biomeSource BiomeSource, rule *surfaceRule, useBandlands bool) *SurfaceRuntime {
-	surfaceRNG := NewXoroshiro128FromSeed(seed + 0x1234567890ABCDEF)
-	secondaryRNG := NewXoroshiro128FromSeed(seed + 0x0EDCBA0987654321)
-
+func NewSurfaceRuntime(seed int64, seaLevel int, noises *NoiseRegistry, biomeSource BiomeSource, rule *surfaceRule, useBandlands bool) *SurfaceRuntime {
+	// Mirrors SurfaceSystem: the surface noises come from the shared noise
+	// registry and noiseRandom is RandomState's master positional factory.
+	factory := NewPositionalRandomFactory(seed)
 	return &SurfaceRuntime{
-		seed:                  seed,
-		noises:                noises,
-		biomeSource:           biomeSource,
-		surfaceNoise:          NewDoublePerlinNoise(&surfaceRNG, []float64{1.0, 1.0, 1.0}, -6),
-		surfaceSecondaryNoise: NewDoublePerlinNoise(&secondaryRNG, []float64{1.0, 1.0}, -6),
-		rule:                  rule,
-		useBandlands:          useBandlands,
-		bandlands:             newSurfaceBandlands(seed),
+		seed:              seed,
+		seaLevel:          seaLevel,
+		noises:            noises,
+		biomeSource:       biomeSource,
+		noiseRandom:       factory,
+		gradientFactories: map[string]PositionalRandomFactory{},
+		rule:              rule,
+		useBandlands:      useBandlands,
+		bandlands:         newSurfaceBandlands(factory),
 	}
 }
 
 func NewOverworldSurfaceRuntime(seed int64, noises *NoiseRegistry, biomeSource BiomeSource) *SurfaceRuntime {
-	return NewSurfaceRuntime(seed, noises, biomeSource, overworldSurfaceRule, true)
+	return NewSurfaceRuntime(seed, 63, noises, biomeSource, overworldSurfaceRule, true)
 }
 
 func NewNetherSurfaceRuntime(seed int64, noises *NoiseRegistry, biomeSource BiomeSource) *SurfaceRuntime {
-	return NewSurfaceRuntime(seed, noises, biomeSource, netherSurfaceRule, false)
+	return NewSurfaceRuntime(seed, 32, noises, biomeSource, netherSurfaceRule, false)
 }
 
 func NewEndSurfaceRuntime(seed int64, noises *NoiseRegistry, biomeSource BiomeSource) *SurfaceRuntime {
-	return NewSurfaceRuntime(seed, noises, biomeSource, endSurfaceRule, false)
+	return NewSurfaceRuntime(seed, 0, noises, biomeSource, endSurfaceRule, false)
 }
 
+// SurfaceDepth mirrors SurfaceSystem.getSurfaceDepth.
 func (s *SurfaceRuntime) SurfaceDepth(x, z int) int {
-	return int((s.surfaceNoise.Sample(float64(x), 0.0, float64(z))+1.0)*2.75 + 3.0)
+	noiseValue := s.noises.Sample(NoiseSurface, float64(x), 0.0, float64(z))
+	rng := s.noiseRandom.At(x, 0, z)
+	return int(noiseValue*2.75 + 3.0 + rng.NextDouble()*0.25)
 }
 
+// SurfaceSecondary mirrors SurfaceSystem.getSurfaceSecondary (raw noise).
 func (s *SurfaceRuntime) SurfaceSecondary(x, z int) float64 {
-	return (s.surfaceSecondaryNoise.Sample(float64(x), 0.0, float64(z)) + 1.0) * 0.5
+	return s.noises.Sample(NoiseSurfaceSecondary, float64(x), 0.0, float64(z))
 }
 
 func (s *SurfaceRuntime) TryApply(ctx SurfaceContext, lookup func(name string, properties map[string]string) uint32) (uint32, bool) {
@@ -199,7 +240,7 @@ func (s *SurfaceRuntime) evalRule(rule *surfaceRule, ctx SurfaceContext, lookup 
 		if !s.useBandlands {
 			return 0, false
 		}
-		state := s.bandlands.blockState(ctx)
+		state := s.bandlandsState(ctx)
 		return lookup(state.name, state.properties), true
 	default:
 		return 0, false
@@ -227,8 +268,10 @@ func (s *SurfaceRuntime) evalCondition(condition *surfaceCondition, ctx SurfaceC
 		if condition.addSurfaceDepth {
 			threshold += ctx.SurfaceDepth
 		}
-		if condition.secondaryDepthRange > 0 {
-			threshold += int(lerp(ctx.SurfaceSecondary, 0.0, float64(condition.secondaryDepthRange)))
+		if condition.secondaryDepthRange != 0 {
+			// Mth.map(surfaceSecondary, -1, 1, 0, range) over the raw noise.
+			t := (ctx.SurfaceSecondary - (-1.0)) / (1.0 - (-1.0))
+			threshold += int(t * float64(condition.secondaryDepthRange))
 		}
 		return depth <= threshold
 	case surfaceConditionYAbove:
@@ -262,10 +305,12 @@ func (s *SurfaceRuntime) evalCondition(condition *surfaceCondition, ctx SurfaceC
 		if ctx.BlockY >= falseY {
 			return false
 		}
-		probability := float64(falseY-ctx.BlockY) / float64(falseY-trueY)
-		posSeed := s.seed + int64(ctx.BlockX)*341873128712 + int64(ctx.BlockY)*132897987541 + int64(ctx.BlockZ)*1664525
-		rng := NewXoroshiro128FromSeed(posSeed)
-		return rng.NextDouble() < probability
+		// Mth.map(y, trueY, falseY, 1.0, 0.0) with a positional random forked
+		// from the gradient's random_name, like VerticalGradientConditionSource.
+		t := (float64(ctx.BlockY) - float64(trueY)) / (float64(falseY) - float64(trueY))
+		probability := 1.0 + t*(0.0-1.0)
+		rng := s.namedRandomFactory(gradientRandomName(condition)).At(ctx.BlockX, ctx.BlockY, ctx.BlockZ)
+		return float64(rng.NextFloat()) < probability
 	case surfaceConditionSteep:
 		return ctx.Steep
 	case surfaceConditionHole:
@@ -273,7 +318,8 @@ func (s *SurfaceRuntime) evalCondition(condition *surfaceCondition, ctx SurfaceC
 	case surfaceConditionAbovePreliminarySurface:
 		return ctx.BlockY >= ctx.MinSurfaceLevel
 	case surfaceConditionTemperature:
-		return s.temperatureValue(ctx) <= 0.2
+		// Mirrors TemperatureHelperCondition: Biome.coldEnoughToSnow.
+		return BiomeColdEnoughToSnow(ctx.Biome, ctx.BlockX, ctx.BlockY, ctx.BlockZ, s.seaLevel)
 	case surfaceConditionNot:
 		return !s.evalCondition(condition.inner, ctx)
 	default:
@@ -286,56 +332,61 @@ func (s *SurfaceRuntime) temperatureValue(ctx SurfaceContext) float64 {
 	return float64(climate[temperatureIdx]) / 10000.0
 }
 
-func newSurfaceBandlands(seed int64) surfaceBandlands {
-	rng := NewXoroshiro128FromSeed(seed + 0xBADBADBAD)
-	bands := generateSurfaceBandlands(seed)
-	return surfaceBandlands{
-		bands:       bands,
-		offsetNoise: NewDoublePerlinNoise(&rng, []float64{1.0}, -8),
-	}
-}
-
-func generateSurfaceBandlands(seed int64) [192]surfaceBlockState {
-	bands := [192]surfaceBlockState{}
+// newSurfaceBandlands mirrors SurfaceSystem.generateBands seeded from
+// noiseRandom.fromHashOf("minecraft:clay_bands").
+func newSurfaceBandlands(factory PositionalRandomFactory) surfaceBandlands {
+	rng := factory.FromHashOf("minecraft:clay_bands")
+	var bands [192]surfaceBlockState
 	for i := range bands {
 		bands[i] = surfaceBlockState{name: "minecraft:terracotta"}
 	}
 
-	rng := NewXoroshiro128FromSeed(seed)
-	paintBandlands(&bands, &rng, "minecraft:orange_terracotta", 4, 3.0)
-	paintBandlands(&bands, &rng, "minecraft:yellow_terracotta", 2, 2.0)
-	paintBandlands(&bands, &rng, "minecraft:brown_terracotta", 2, 3.0)
-	paintBandlands(&bands, &rng, "minecraft:red_terracotta", 2, 2.0)
-
-	for i := 0; i < 2; i++ {
-		start := int(rng.NextDouble() * 192.0)
-		if start >= 0 && start < len(bands) {
-			bands[start] = surfaceBlockState{name: "minecraft:white_terracotta"}
+	for i := 0; i < len(bands); i++ {
+		i += int(rng.NextInt(5)) + 1
+		if i < len(bands) {
+			bands[i] = surfaceBlockState{name: "minecraft:orange_terracotta"}
 		}
 	}
 
-	paintBandlands(&bands, &rng, "minecraft:light_gray_terracotta", 2, 2.0)
-	return bands
+	makeClayBands(&rng, &bands, 1, "minecraft:yellow_terracotta")
+	makeClayBands(&rng, &bands, 2, "minecraft:brown_terracotta")
+	makeClayBands(&rng, &bands, 1, "minecraft:red_terracotta")
+
+	whiteBandCount := int(rng.NextInt(15-9+1)) + 9
+	placed := 0
+	for start := 0; placed < whiteBandCount && start < len(bands); start += int(rng.NextInt(16)) + 4 {
+		bands[start] = surfaceBlockState{name: "minecraft:white_terracotta"}
+		if start-1 > 0 && rng.NextBool() {
+			bands[start-1] = surfaceBlockState{name: "minecraft:light_gray_terracotta"}
+		}
+		if start+1 < len(bands) && rng.NextBool() {
+			bands[start+1] = surfaceBlockState{name: "minecraft:light_gray_terracotta"}
+		}
+		placed++
+	}
+
+	return surfaceBandlands{bands: bands}
 }
 
-func paintBandlands(bands *[192]surfaceBlockState, rng *Xoroshiro128, name string, count int, maxWidth float64) {
-	for i := 0; i < count; i++ {
-		start := int(rng.NextDouble() * 192.0)
-		width := int(rng.NextDouble()*maxWidth + 1.0)
-		for offset := 0; offset < width; offset++ {
-			idx := start + offset
-			if idx >= 0 && idx < len(bands) {
-				bands[idx] = surfaceBlockState{name: name}
-			}
+func makeClayBands(rng *Xoroshiro128, bands *[192]surfaceBlockState, baseWidth int, name string) {
+	bandCount := int(rng.NextInt(15-6+1)) + 6
+	for i := 0; i < bandCount; i++ {
+		width := baseWidth + int(rng.NextInt(3))
+		start := int(rng.NextInt(uint32(len(bands))))
+		for p := 0; start+p < len(bands) && p < width; p++ {
+			bands[start+p] = surfaceBlockState{name: name}
 		}
 	}
 }
 
-func (b surfaceBandlands) blockState(ctx SurfaceContext) surfaceBlockState {
-	offset := int(math.Round(b.offsetNoise.Sample(float64(ctx.BlockX), 0.0, float64(ctx.BlockZ)) * 4.0))
-	index := (ctx.BlockY + offset + len(b.bands)) % len(b.bands)
+// bandlandsState mirrors SurfaceSystem.getBand, including Java's
+// floor(x+0.5) rounding.
+func (s *SurfaceRuntime) bandlandsState(ctx SurfaceContext) surfaceBlockState {
+	offsetNoise := s.noises.Sample(NoiseClayBandsOffset, float64(ctx.BlockX), 0.0, float64(ctx.BlockZ))
+	offset := int(math.Floor(offsetNoise*4.0 + 0.5))
+	index := (ctx.BlockY + offset + len(s.bandlands.bands)) % len(s.bandlands.bands)
 	if index < 0 {
-		index += len(b.bands)
+		index += len(s.bandlands.bands)
 	}
-	return b.bands[index]
+	return s.bandlands.bands[index]
 }
