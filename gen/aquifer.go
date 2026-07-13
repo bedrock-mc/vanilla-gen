@@ -181,7 +181,6 @@ func NewNoiseBasedAquifer(
 	maxAdjustedSurfaceLevel := maxSurfaceLevel + 8
 	skipSamplingAboveGridY := aquiferGridY(maxAdjustedSurfaceLevel+12) + 1
 	a.skipSamplingAboveY = aquiferFromGridY(skipSamplingAboveGridY, 11) - 1
-	a.skipSamplingAboveY = math.MaxInt32 // TEMP-BISECT
 
 	return a
 }
@@ -393,9 +392,10 @@ func (a *NoiseBasedAquifer) computeSurfaceLevel(
 	}
 
 	floodednessNoise := clampFloat(a.evalSimpleRoot(OverworldRootFluidLevelFloodedness, ctx), -1, 1)
-	// TEMP-BISECT old thresholds
-	fullyFloodedThreshold := 0.8 - 1.1*floodednessFactor
-	partiallyFloodedThreshold := 0.4 - 1.2*floodednessFactor
+	// Mth.map(floodednessFactor, 1.0, 0.0, -0.3, 0.8) / (..., -0.8, 0.4),
+	// replicated term for term to stay bit-exact with vanilla.
+	fullyFloodedThreshold := mthMap(floodednessFactor, 1.0, 0.0, -0.3, 0.8)
+	partiallyFloodedThreshold := mthMap(floodednessFactor, 1.0, 0.0, -0.8, 0.4)
 	partiallyFloodedness := floodednessNoise - partiallyFloodedThreshold
 	fullyFloodedness := floodednessNoise - fullyFloodedThreshold
 
