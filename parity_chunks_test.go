@@ -186,3 +186,86 @@ func TestChunkParityBaseTerrain(t *testing.T) {
 		t.Errorf("base terrain mismatch rate too high: %d/%d", bad, totalBlocks)
 	}
 }
+
+// TestChunkParityNames aggregates java->local block name mismatches to
+// attribute remaining diffs to specific features. Diagnostic only.
+func TestChunkParityNames(t *testing.T) {
+	dir := os.Getenv("VANILLA_GT_REGION_DIR")
+	if dir == "" {
+		t.Skip("VANILLA_GT_REGION_DIR not set")
+	}
+	w, err := parity.OpenRegionDir(dir)
+	if err != nil {
+		t.Fatalf("open region dir: %v", err)
+	}
+	chunkRange := 2
+	if os.Getenv("VANILLA_GT_FULL") != "" {
+		chunkRange = 8
+	}
+	h := newChunkParityHarness(1)
+	r := h.g.dimension.Range()
+	pairs := map[string]int{}
+	total := 0
+	for cx := -chunkRange; cx < chunkRange; cx++ {
+		for cz := -chunkRange; cz < chunkRange; cz++ {
+			jc, err := w.Chunk(cx, cz)
+			if err != nil {
+				t.Fatalf("chunk: %v", err)
+			}
+			c := chunk.New(world.DefaultBlockRegistry, r)
+			h.g.GenerateChunk(world.ChunkPos{int32(cx), int32(cz)}, c)
+			for x := 0; x < 16; x++ {
+				for z := 0; z < 16; z++ {
+					for y := r.Min(); y <= r.Max(); y++ {
+						jname := jc.BlockState(x, y, z)
+						if i := strings.IndexByte(jname, '['); i >= 0 {
+							jname = jname[:i]
+						}
+						jname = strings.TrimPrefix(jname, "minecraft:")
+						lname := h.g.carverBlockName(c.Block(uint8(x), int16(y), uint8(z), 0))
+						total++
+						if !sameBlockName(jname, lname) {
+							pairs[jname+" -> "+lname]++
+						}
+					}
+				}
+			}
+		}
+	}
+	type pc struct {
+		pair string
+		n    int
+	}
+	var ps []pc
+	bad := 0
+	for p, n := range pairs {
+		ps = append(ps, pc{p, n})
+		bad += n
+	}
+	sort.Slice(ps, func(a, b int) bool { return ps[a].n > ps[b].n })
+	if len(ps) > 40 {
+		ps = ps[:40]
+	}
+	t.Logf("name mismatches: %d/%d (%.3f%%)", bad, total, 100*float64(bad)/float64(total))
+	for _, p := range ps {
+		t.Logf("%7d  %s", p.n, p.pair)
+	}
+}
+
+var javaToLocalNames = map[string]string{
+	"grass_block": "grass",
+	"cave_air":    "air",
+	"void_air":    "air",
+	"snow":        "snow_layer",
+	"magma_block": "magma",
+}
+
+func sameBlockName(java, local string) bool {
+	if java == local {
+		return true
+	}
+	if mapped, ok := javaToLocalNames[java]; ok && mapped == local {
+		return true
+	}
+	return false
+}

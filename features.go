@@ -638,63 +638,210 @@ func (g Generator) executeMultifaceGrowth(c *chunk.Chunk, pos cube.Pos, cfg gen.
 	return false
 }
 
+// executeOre ports OreFeature.place/doPlace exactly: float32 direction, the
+// per-segment random radii, overlap elimination and the tested-position
+// bitset all affect RNG order and shape.
 func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom, scattered bool) bool {
+	if scattered {
+		return g.executeScatteredOre(c, pos, cfg, chunkX, chunkZ, minY, maxY, rng)
+	}
 	if cfg.Size <= 0 {
 		return false
 	}
-	if scattered {
-		var placedAny bool
-		for i := 0; i < cfg.Size; i++ {
-			candidate := pos.Add(cube.Pos{
-				int(rng.NextInt(5)) - 2,
-				int(rng.NextInt(5)) - 2,
-				int(rng.NextInt(5)) - 2,
-			})
-			if g.tryPlaceOreAt(c, candidate, cfg, chunkX, chunkZ, minY, maxY, rng) {
-				placedAny = true
+
+	dir := rng.NextFloat() * float32(math.Pi)
+	spreadXY := float32(cfg.Size) / 8.0
+	maxRadius := int(math.Ceil(float64((float32(cfg.Size)/16.0*2.0 + 1.0) / 2.0)))
+	x0 := float64(pos[0]) + math.Sin(float64(dir))*float64(spreadXY)
+	x1 := float64(pos[0]) - math.Sin(float64(dir))*float64(spreadXY)
+	z0 := float64(pos[2]) + math.Cos(float64(dir))*float64(spreadXY)
+	z1 := float64(pos[2]) - math.Cos(float64(dir))*float64(spreadXY)
+	y0 := float64(pos[1] + int(rng.NextInt(3)) - 2)
+	y1 := float64(pos[1] + int(rng.NextInt(3)) - 2)
+	xStart := pos[0] - int(math.Ceil(float64(spreadXY))) - maxRadius
+	yStart := pos[1] - 2 - maxRadius
+	zStart := pos[2] - int(math.Ceil(float64(spreadXY))) - maxRadius
+	sizeXZ := 2 * (int(math.Ceil(float64(spreadXY))) + maxRadius)
+	sizeY := 2 * (2 + maxRadius)
+
+	// OreFeature aborts unless some column in the probe square reaches the
+	// ocean floor heightmap; underground this passes on the first column.
+	probed := false
+	for xprobe := xStart; xprobe <= xStart+sizeXZ && !probed; xprobe++ {
+		for zprobe := zStart; zprobe <= zStart+sizeXZ; zprobe++ {
+			localX := clamp(xprobe-chunkX*16, 0, 15)
+			localZ := clamp(zprobe-chunkZ*16, 0, 15)
+			if yStart <= g.columnHeightmapY(c, localX, localZ, "OCEAN_FLOOR", minY, maxY) {
+				probed = true
+				break
 			}
 		}
-		return placedAny
+	}
+	if !probed {
+		return false
 	}
 
-	angle := rng.NextDouble() * math.Pi
-	spread := float64(cfg.Size) / 8.0
-	x1 := float64(pos[0]) + math.Sin(angle)*spread
-	x2 := float64(pos[0]) - math.Sin(angle)*spread
-	z1 := float64(pos[2]) + math.Cos(angle)*spread
-	z2 := float64(pos[2]) - math.Cos(angle)*spread
-	y1 := float64(pos[1] + int(rng.NextInt(3)) - 1)
-	y2 := float64(pos[1] + int(rng.NextInt(3)) - 1)
+	size := cfg.Size
+	data := make([]float64, size*4)
+	for i := 0; i < size; i++ {
+		step := float32(i) / float32(size)
+		ss := rng.NextDouble() * float64(size) / 16.0
+		radius := ((float64(gen.MthSin(float32(math.Pi)*step)) + 1.0) * ss + 1.0) / 2.0
+		data[i*4+0] = lerp(float64(step), x0, x1)
+		data[i*4+1] = lerp(float64(step), y0, y1)
+		data[i*4+2] = lerp(float64(step), z0, z1)
+		data[i*4+3] = radius
+	}
 
-	var placedAny bool
-	for i := 0; i < cfg.Size; i++ {
-		t := float64(i) / float64(cfg.Size)
-		cx := lerp(t, x1, x2)
-		cy := lerp(t, y1, y2)
-		cz := lerp(t, z1, z2)
-		radius := ((1.0-math.Abs(2.0*t-1.0))*float64(cfg.Size)/16.0 + 1.0) / 2.0
-		minX, maxX := int(math.Floor(cx-radius)), int(math.Ceil(cx+radius))
-		minZ, maxZ := int(math.Floor(cz-radius)), int(math.Ceil(cz+radius))
-		minBlockY, maxBlockY := int(math.Floor(cy-radius)), int(math.Ceil(cy+radius))
-		for x := minX; x <= maxX; x++ {
-			for y := minBlockY; y <= maxBlockY; y++ {
-				for z := minZ; z <= maxZ; z++ {
-					candidate := cube.Pos{x, y, z}
-					if !g.positionInChunk(candidate, chunkX, chunkZ, minY, maxY) {
+	for a := 0; a < size-1; a++ {
+		if data[a*4+3] <= 0.0 {
+			continue
+		}
+		for b := a + 1; b < size; b++ {
+			if data[b*4+3] <= 0.0 {
+				continue
+			}
+			dx := data[a*4+0] - data[b*4+0]
+			dy := data[a*4+1] - data[b*4+1]
+			dz := data[a*4+2] - data[b*4+2]
+			dr := data[a*4+3] - data[b*4+3]
+			if dr*dr > dx*dx+dy*dy+dz*dz {
+				if dr > 0.0 {
+					data[b*4+3] = -1.0
+				} else {
+					data[a*4+3] = -1.0
+				}
+			}
+		}
+	}
+
+	tested := make(map[int]struct{}, 64)
+	placed := false
+	for i := 0; i < size; i++ {
+		radius := data[i*4+3]
+		if radius < 0.0 {
+			continue
+		}
+		xx := data[i*4+0]
+		yy := data[i*4+1]
+		zz := data[i*4+2]
+		xMin := max(int(math.Floor(xx-radius)), xStart)
+		yMin := max(int(math.Floor(yy-radius)), yStart)
+		zMin := max(int(math.Floor(zz-radius)), zStart)
+		xMax := max(int(math.Floor(xx+radius)), xMin)
+		yMax := max(int(math.Floor(yy+radius)), yMin)
+		zMax := max(int(math.Floor(zz+radius)), zMin)
+		for x := xMin; x <= xMax; x++ {
+			xd := (float64(x) + 0.5 - xx) / radius
+			if xd*xd >= 1.0 {
+				continue
+			}
+			for y := yMin; y <= yMax; y++ {
+				yd := (float64(y) + 0.5 - yy) / radius
+				if xd*xd+yd*yd >= 1.0 {
+					continue
+				}
+				for z := zMin; z <= zMax; z++ {
+					zd := (float64(z) + 0.5 - zz) / radius
+					if xd*xd+yd*yd+zd*zd >= 1.0 || y < minY || y > maxY {
 						continue
 					}
-					dx, dy, dz := float64(x)-cx, float64(y)-cy, float64(z)-cz
-					if dx*dx+dy*dy+dz*dz > radius*radius {
+					bitIndex := x - xStart + (y-yStart)*sizeXZ + (z-zStart)*sizeXZ*sizeY
+					if _, seen := tested[bitIndex]; seen {
 						continue
 					}
-					if g.tryPlaceOreAt(c, candidate, cfg, chunkX, chunkZ, minY, maxY, rng) {
-						placedAny = true
+					tested[bitIndex] = struct{}{}
+					orePos := cube.Pos{x, y, z}
+					// ensureCanWrite: only positions we can materialize.
+					if !g.positionInFeatureScope(orePos, chunkX, chunkZ, minY, maxY) {
+						continue
+					}
+					currentName := g.blockNameAt(c, orePos)
+					for _, target := range cfg.Targets {
+						if !g.oreTargetMatches(currentName, target) {
+							continue
+						}
+						if g.canPlaceOreAt(c, orePos, cfg, chunkX, chunkZ, minY, maxY, rng) {
+							if g.setBlockStateDirect(c, orePos, target.State) {
+								placed = true
+							}
+						}
+						break
 					}
 				}
 			}
 		}
 	}
-	return placedAny
+	return placed
+}
+
+// canPlaceOreAt ports OreFeature.canPlaceOre minus the (already checked)
+// target test: the fractional discard chance consumes a nextFloat.
+func (g Generator) canPlaceOreAt(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
+	chance := float32(cfg.DiscardChanceOnAirExposure)
+	if chance <= 0.0 {
+		return true
+	}
+	if chance < 1.0 && rng.NextFloat() >= chance {
+		return true
+	}
+	return !g.oreAdjacentToAir(c, pos, chunkX, chunkZ, minY, maxY)
+}
+
+func (g Generator) oreAdjacentToAir(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int) bool {
+	for _, d := range [6]cube.Pos{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}} {
+		if g.blockNameAtSafe(c, pos.Add(d), chunkX, chunkZ, minY, maxY) == "air" {
+			return true
+		}
+	}
+	return false
+}
+
+func (g Generator) oreTargetMatches(blockName string, target gen.OreTargetConfig) bool {
+	switch target.Target.PredicateType {
+	case "tag_match":
+		return g.matchesOreTag(blockName, target.Target.Tag)
+	case "block_match":
+		return blockName == target.Target.Block
+	default:
+		if target.Target.Tag != "" {
+			return g.matchesOreTag(blockName, target.Target.Tag)
+		}
+		return target.Target.Block != "" && blockName == target.Target.Block
+	}
+}
+
+// executeScatteredOre ports ScatteredOreFeature.
+func (g Generator) executeScatteredOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
+	placed := false
+	count := int(rng.NextInt(uint32(cfg.Size + 1)))
+	for j := 0; j < count; j++ {
+		spread := min(j, 7)
+		dx := scatteredOreOffset(rng, spread)
+		dy := scatteredOreOffset(rng, spread)
+		dz := scatteredOreOffset(rng, spread)
+		orePos := cube.Pos{pos[0] + dx, pos[1] + dy, pos[2] + dz}
+		if !g.positionInFeatureScope(orePos, chunkX, chunkZ, minY, maxY) {
+			continue
+		}
+		currentName := g.blockNameAt(c, orePos)
+		for _, target := range cfg.Targets {
+			if !g.oreTargetMatches(currentName, target) {
+				continue
+			}
+			if g.canPlaceOreAt(c, orePos, cfg, chunkX, chunkZ, minY, maxY, rng) {
+				if g.setBlockStateDirect(c, orePos, target.State) {
+					placed = true
+				}
+			}
+			break
+		}
+	}
+	return placed
+}
+
+func scatteredOreOffset(rng *gen.WorldgenRandom, spread int) int {
+	return int(rng.NextInt(uint32(2*spread+1))) - spread
 }
 
 func (g Generator) executeDisk(c *chunk.Chunk, pos cube.Pos, cfg gen.DiskConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {

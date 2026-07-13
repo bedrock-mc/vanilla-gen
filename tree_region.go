@@ -1,6 +1,7 @@
 package vanilla
 
 import (
+	"math"
 	"sync"
 
 	gen "github.com/bedrock-mc/vanilla-gen/gen"
@@ -215,8 +216,12 @@ func (g Generator) runPlacedTreeFeatureAcrossRegion(region *treeDecorationRegion
 	}
 }
 
+// placedFeatureNeedsReplayAcrossRegion reports whether neighbor-chunk origins
+// of this feature can write into the center chunk (vanilla features write
+// into the whole WorldGenRegion); such features are re-simulated from every
+// chunk in the 3x3 region.
 func (g Generator) placedFeatureNeedsReplayAcrossRegion(featureName string) bool {
-	return g.placedFeatureRefMayPlaceTrees(gen.PlacedFeatureRef{Name: featureName}, map[string]struct{}{}, map[string]struct{}{})
+	return g.decorationMarginForPlacedFeatureName(featureName) > 0
 }
 
 func (g Generator) placedFeatureRefMayPlaceTrees(ref gen.PlacedFeatureRef, seenPlaced, seenConfigured map[string]struct{}) bool {
@@ -382,6 +387,26 @@ func (g Generator) configuredFeatureDecorationMargin(ref gen.ConfiguredFeatureRe
 		return 11
 	case "monster_room":
 		return 4
+	case "ore":
+		cfg, err := feature.Ore()
+		if err != nil {
+			return 0
+		}
+		spread := int(math.Ceil(float64(cfg.Size) / 8.0))
+		maxRadius := int(math.Ceil((float64(cfg.Size)/16.0*2.0 + 1.0) / 2.0))
+		return spread + maxRadius
+	case "scattered_ore":
+		return 7
+	case "disk":
+		cfg, err := feature.Disk()
+		if err != nil {
+			return 0
+		}
+		upper := cfg.Radius.MaxInclusive
+		if cfg.Radius.Constant != nil && *cfg.Radius.Constant > upper {
+			upper = *cfg.Radius.Constant
+		}
+		return max(upper, 1)
 	case "desert_well":
 		return 2
 	case "blue_ice":
@@ -512,7 +537,7 @@ func (g Generator) configuredFeatureRefNeedsDecorationRegion(ref gen.ConfiguredF
 	}
 
 	switch feature.Type {
-	case "tree", "geode", "fossil", "monster_room", "desert_well", "iceberg", "blue_ice":
+	case "tree", "geode", "fossil", "monster_room", "desert_well", "iceberg", "blue_ice", "ore", "scattered_ore", "disk":
 		return true
 	case "random_selector":
 		cfg, err := feature.RandomSelector()

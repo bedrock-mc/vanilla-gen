@@ -10,10 +10,13 @@ const (
 	aquiferSampleOffsetX        = -5
 	aquiferSampleOffsetY        = 1
 	aquiferSampleOffsetZ        = -5
-	aquiferLavaThresholdY       = -10
-	aquiferWayBelowMinY         = math.MinInt32 + 1
-	aquiferErosionDeepDarkLimit = -0.225
-	aquiferDepthDeepDarkLimit   = 0.9
+	aquiferLavaThresholdY = -10
+	// DimensionType.WAY_BELOW_MIN_Y = DimensionType.MIN_Y * 2 in vanilla.
+	aquiferWayBelowMinY = -2032 * 2
+	// OverworldBiomeBuilder.isDeepDarkRegion compares against the float
+	// literals -0.225F and 0.9F widened to double.
+	aquiferErosionDeepDarkLimit = float64(float32(-0.225))
+	aquiferDepthDeepDarkLimit   = float64(float32(0.9))
 )
 
 var aquiferSurfaceSamplingOffsets = [13][2]int{
@@ -72,7 +75,11 @@ type OverworldFluidPicker struct {
 }
 
 func (p OverworldFluidPicker) ComputeFluid(_ int, y int, _ int) FluidStatus {
-	if y < -54 {
+	lavaLimit := -54
+	if p.SeaLevel < lavaLimit {
+		lavaLimit = p.SeaLevel
+	}
+	if y < lavaLimit {
 		return FluidStatus{FluidLevel: -54, FluidType: FluidLava}
 	}
 	return FluidStatus{FluidLevel: p.SeaLevel, FluidType: FluidWater}
@@ -135,28 +142,48 @@ func NewNoiseBasedAquifer(
 	cacheSizeZ := maxGridZ - minGridZ + 1
 	cacheLen := cacheSizeX * cacheSizeY * cacheSizeZ
 
-	return &NoiseBasedAquifer{
-		graph:              graph,
-		noises:             noises,
-		mainFlat:           flat,
-		mainChunkX:         chunkX,
-		mainChunkZ:         chunkZ,
-		positionalRandom:   NewPositionalRandomFactory(seed).ForkAquiferRandom(),
-		fluidPicker:        fluidPicker,
-		scratch:            NewEvalScratch(graph),
-		neighborGrids:      make(map[uint64]*FlatCacheGrid, 16),
-		columnCache:        make(map[uint64]*ColumnContext, 128),
-		surfaceCache:       make(map[uint64]int, 128),
-		cacheMin:           aquiferCellKey{x: minGridX, y: minGridY, z: minGridZ},
-		cacheSizeX:         cacheSizeX,
-		cacheSizeY:         cacheSizeY,
-		cacheSizeZ:         cacheSizeZ,
-		locationSet:        make([]bool, cacheLen),
-		locationCache:      make([]aquiferLocation, cacheLen),
-		statusSet:          make([]bool, cacheLen),
-		statusCache:        make([]FluidStatus, cacheLen),
-		skipSamplingAboveY: math.MaxInt32,
+	a := &NoiseBasedAquifer{
+		graph:            graph,
+		noises:           noises,
+		mainFlat:         flat,
+		mainChunkX:       chunkX,
+		mainChunkZ:       chunkZ,
+		positionalRandom: NewPositionalRandomFactory(seed).ForkAquiferRandom(),
+		fluidPicker:      fluidPicker,
+		scratch:          NewEvalScratch(graph),
+		neighborGrids:    make(map[uint64]*FlatCacheGrid, 16),
+		columnCache:      make(map[uint64]*ColumnContext, 128),
+		surfaceCache:     make(map[uint64]int, 128),
+		cacheMin:         aquiferCellKey{x: minGridX, y: minGridY, z: minGridZ},
+		cacheSizeX:       cacheSizeX,
+		cacheSizeY:       cacheSizeY,
+		cacheSizeZ:       cacheSizeZ,
+		locationSet:      make([]bool, cacheLen),
+		locationCache:    make([]aquiferLocation, cacheLen),
+		statusSet:        make([]bool, cacheLen),
+		statusCache:      make([]FluidStatus, cacheLen),
 	}
+
+	// Vanilla: maxPreliminarySurfaceLevel over the aquifer grid footprint,
+	// adjusted by +8, drives the y above which sampling is skipped entirely.
+	maxSurfaceLevel := math.MinInt32
+	minBlockX := aquiferFromGridX(minGridX, 0)
+	maxBlockX := aquiferFromGridX(maxGridX, 9)
+	minBlockZ := aquiferFromGridZ(minGridZ, 0)
+	maxBlockZ := aquiferFromGridZ(maxGridZ, 9)
+	for blockZ := minBlockZ; blockZ <= maxBlockZ; blockZ += 4 {
+		for blockX := minBlockX; blockX <= maxBlockX; blockX += 4 {
+			if level := a.preliminarySurfaceLevel(blockX, blockZ); level > maxSurfaceLevel {
+				maxSurfaceLevel = level
+			}
+		}
+	}
+	maxAdjustedSurfaceLevel := maxSurfaceLevel + 8
+	skipSamplingAboveGridY := aquiferGridY(maxAdjustedSurfaceLevel+12) + 1
+	a.skipSamplingAboveY = aquiferFromGridY(skipSamplingAboveGridY, 11) - 1
+	a.skipSamplingAboveY = math.MaxInt32 // TEMP-BISECT
+
+	return a
 }
 
 func (a *NoiseBasedAquifer) ComputeSubstance(ctx FunctionContext, density float64) AquiferSubstance {
@@ -293,22 +320,7 @@ func (a *NoiseBasedAquifer) computeFluid(x, y, z int) FluidStatus {
 	for i, offset := range aquiferSurfaceSamplingOffsets {
 		sampleX := x + offset[0]*16
 		sampleZ := z + offset[1]*16
-		quartX := (sampleX >> 2) << 2
-		quartZ := (sampleZ >> 2) << 2
-
-		rawSurface, ok := a.surfaceCache[aquiferXZKey(quartX, quartZ)]
-		if !ok {
-			col := a.getColumnContext(quartX, quartZ)
-			grid := a.gridForBlock(quartX, quartZ)
-			rawSurface = int(math.Floor(ComputePreliminarySurfaceLevel(
-				FunctionContext{BlockX: quartX, BlockY: 0, BlockZ: quartZ},
-				a.noises,
-				grid,
-				col,
-			)))
-			a.surfaceCache[aquiferXZKey(quartX, quartZ)] = rawSurface
-		}
-
+		rawSurface := a.preliminarySurfaceLevel(sampleX, sampleZ)
 		adjustedSurface := rawSurface + 8
 		isAtOurPosition := i == 0
 		if isAtOurPosition && yLower > adjustedSurface {
@@ -340,6 +352,28 @@ func (a *NoiseBasedAquifer) computeFluid(x, y, z int) FluidStatus {
 	}
 }
 
+// preliminarySurfaceLevel mirrors NoiseChunk.preliminarySurfaceLevel: the
+// sample position is quantized to quart coordinates and the resulting level is
+// cached per column.
+func (a *NoiseBasedAquifer) preliminarySurfaceLevel(sampleX, sampleZ int) int {
+	quartX := (sampleX >> 2) << 2
+	quartZ := (sampleZ >> 2) << 2
+	key := aquiferXZKey(quartX, quartZ)
+	if cached, ok := a.surfaceCache[key]; ok {
+		return cached
+	}
+	col := a.getColumnContext(quartX, quartZ)
+	grid := a.gridForBlock(quartX, quartZ)
+	rawSurface := int(math.Floor(ComputePreliminarySurfaceLevel(
+		FunctionContext{BlockX: quartX, BlockY: 0, BlockZ: quartZ},
+		a.noises,
+		grid,
+		col,
+	)))
+	a.surfaceCache[key] = rawSurface
+	return rawSurface
+}
+
 func (a *NoiseBasedAquifer) computeSurfaceLevel(
 	x, y, z int,
 	globalFluid FluidStatus,
@@ -347,32 +381,53 @@ func (a *NoiseBasedAquifer) computeSurfaceLevel(
 	isBelowSurfaceWithFluid bool,
 ) int {
 	ctx := FunctionContext{BlockX: x, BlockY: y, BlockZ: z}
-	col := a.getColumnContext(x, z)
-	grid := a.gridForBlock(x, z)
-	if a.isDeepDarkRegion(ctx, grid, col) {
+	if a.isDeepDarkRegion(ctx) {
 		return aquiferWayBelowMinY
 	}
 
+	// Mth.clampedMap(distanceBelowSurface, 0.0, 64.0, 1.0, 0.0)
 	distFromSurface := minSurfaceRaw + 8 - y
-	surfaceProximity := 0.0
+	floodednessFactor := 0.0
 	if isBelowSurfaceWithFluid {
-		clamped := clampFloat(float64(distFromSurface), 0, 64)
-		surfaceProximity = 1.0 - clamped/64.0
+		floodednessFactor = mthClampedLerp(1.0, 0.0, mthInverseLerp(float64(distFromSurface), 0.0, 64.0))
 	}
 
 	floodednessNoise := clampFloat(a.evalSimpleRoot(OverworldRootFluidLevelFloodedness, ctx), -1, 1)
-	thresholdH := 0.8 - 1.1*surfaceProximity
-	thresholdO := 0.4 - 1.2*surfaceProximity
-	d := floodednessNoise - thresholdO
-	e := floodednessNoise - thresholdH
+	// TEMP-BISECT old thresholds
+	fullyFloodedThreshold := 0.8 - 1.1*floodednessFactor
+	partiallyFloodedThreshold := 0.4 - 1.2*floodednessFactor
+	partiallyFloodedness := floodednessNoise - partiallyFloodedThreshold
+	fullyFloodedness := floodednessNoise - fullyFloodedThreshold
 
-	if e > 0 {
+	if fullyFloodedness > 0 {
 		return globalFluid.FluidLevel
 	}
-	if d > 0 {
+	if partiallyFloodedness > 0 {
 		return a.computeRandomizedFluidLevel(x, y, z, minSurfaceRaw)
 	}
 	return aquiferWayBelowMinY
+}
+
+func mthInverseLerp(value, from, to float64) float64 {
+	return (value - from) / (to - from)
+}
+
+func mthLerp(t, from, to float64) float64 {
+	return from + t*(to-from)
+}
+
+func mthMap(value, fromMin, fromMax, toMin, toMax float64) float64 {
+	return mthLerp(mthInverseLerp(value, fromMin, fromMax), toMin, toMax)
+}
+
+func mthClampedLerp(from, to, t float64) float64 {
+	if t < 0 {
+		return from
+	}
+	if t > 1 {
+		return to
+	}
+	return mthLerp(t, from, to)
 }
 
 func (a *NoiseBasedAquifer) computeRandomizedFluidLevel(x, y, z, minSurface int) int {
@@ -408,9 +463,19 @@ func (a *NoiseBasedAquifer) computeFluidType(x, y, z int, globalFluid FluidStatu
 	return FluidWater
 }
 
-func (a *NoiseBasedAquifer) isDeepDarkRegion(ctx FunctionContext, grid *FlatCacheGrid, col *ColumnContext) bool {
-	erosion := a.graph.Eval(OverworldRootErosion, ctx, a.noises, grid, col, a.scratch)
-	depth := a.graph.Eval(OverworldRootDepth, ctx, a.noises, grid, col, a.scratch)
+// isDeepDarkRegion evaluates the wrapped router erosion/depth like vanilla's
+// NoiseChunk.FlatCache: positions whose quart column lies inside the
+// generating chunk's flat cache use the quart-corner cached values, anything
+// outside falls through to an exact point evaluation.
+func (a *NoiseBasedAquifer) isDeepDarkRegion(ctx FunctionContext) bool {
+	var flat *FlatCacheGrid
+	relQuartX := (ctx.BlockX >> 2) - a.mainChunkX*4
+	relQuartZ := (ctx.BlockZ >> 2) - a.mainChunkZ*4
+	if relQuartX >= 0 && relQuartX <= 4 && relQuartZ >= 0 && relQuartZ <= 4 {
+		flat = a.mainFlat
+	}
+	erosion := a.graph.Eval(OverworldRootErosion, ctx, a.noises, flat, nil, a.scratch)
+	depth := a.graph.Eval(OverworldRootDepth, ctx, a.noises, flat, nil, a.scratch)
 	return erosion < aquiferErosionDeepDarkLimit && depth > aquiferDepthDeepDarkLimit
 }
 
