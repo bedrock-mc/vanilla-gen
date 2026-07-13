@@ -307,8 +307,6 @@ func (g Generator) buildPlannedDirectStructure(
 		return g.buildStrongholdStructure(startChunk, startX, startZ, surfaceSampler, rng)
 	case "fortress":
 		return g.buildFortressStructure(candidate, startChunk, startX, startZ, surfaceSampler, rng)
-	case "mineshaft":
-		return g.buildMineshaftStructure(candidate, startChunk, startX, startZ, surfaceSampler, rng)
 	case "ocean_monument":
 		return g.buildOceanMonumentStructure(candidate, startChunk, startX, startZ, surfaceSampler, rng)
 	case "woodland_mansion":

@@ -41,6 +41,7 @@ type plannedStructureStart struct {
 	rootOrigin        cube.Pos
 	rootSize          [3]int
 	pieces            []plannedStructurePiece
+	mineshaft         *plannedMineshaft
 }
 
 type PlannedStructureInfo struct {
@@ -634,6 +635,16 @@ func (g Generator) planStructureStart(planner structurePlanner, startChunk world
 	if surfaceSampler == nil {
 		surfaceSampler = newStructureHeightSampler(g, minY, maxY)
 	}
+
+	// The mineshafts set is ported exactly (vanilla candidate selection,
+	// generation-context RNG and post-generation biome check), bypassing the
+	// generic surface-biome pre-check below.
+	if plannerIsMineshaftSet(planner) {
+		start, ok := g.planMineshaftSetStart(planner, startChunk, minY, maxY, surfaceSampler)
+		g.structureStarts.Store(cacheKey, start, ok)
+		return start, ok
+	}
+
 	surfaceHeightmapY := surfaceSampler.worldSurfaceLevelAt(startX+8, startZ+8)
 	surfaceY := clamp(surfaceHeightmapY-1, minY, maxY)
 	surfaceBiome := g.biomeSource.GetBiome(startX+8, surfaceY, startZ+8)
@@ -856,6 +867,10 @@ func structureIntersectsChunk(start plannedStructureStart, chunkX, chunkZ, minY,
 }
 
 func (g Generator) placePlannedStructure(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, start plannedStructureStart, structureRNG *gen.WorldgenRandom) {
+	if start.mineshaft != nil {
+		g.placeMineshaftStart(c, chunkX, chunkZ, minY, maxY, start, structureRNG)
+		return
+	}
 	for _, piece := range start.pieces {
 		if !piece.bounds.intersectsChunk(chunkX, chunkZ, minY, maxY) {
 			continue

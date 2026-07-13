@@ -17,8 +17,8 @@ func TestPerfColdArea(t *testing.T) {
 	r := g.dimension.Range()
 	start := time.Now()
 	n := 0
-	for cx := 10; cx < 20; cx++ {
-		for cz := 10; cz < 20; cz++ {
+	for cx := 30; cx < 40; cx++ {
+		for cz := 30; cz < 40; cz++ {
 			c := chunk.New(world.DefaultBlockRegistry, r)
 			g.GenerateChunk(world.ChunkPos{int32(cx), int32(cz)}, c)
 			n++

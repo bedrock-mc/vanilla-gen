@@ -2,7 +2,9 @@ package vanilla
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -24,7 +26,8 @@ const (
 )
 
 type treePlacementRecord struct {
-	set map[cube.Pos]struct{}
+	set   map[cube.Pos]struct{}
+	order []cube.Pos
 }
 
 type treeFoliageAttachment struct {
@@ -52,6 +55,10 @@ type treeRuntime struct {
 	foliage     treePlacementRecord
 	decorations treePlacementRecord
 }
+
+var debugTreeTraceValue = os.Getenv("DEBUG_TREE_TRACE")
+
+func debugTreeTraceEnabled() bool { return debugTreeTraceValue != "" }
 
 func newTreeRuntime(g Generator, c *chunk.Chunk, origin cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.WorldgenRandom) treeRuntime {
 	chunkX := floorDiv(origin[0], 16)
@@ -82,7 +89,11 @@ func newTreePlacementRecord() treePlacementRecord {
 }
 
 func (r *treePlacementRecord) add(pos cube.Pos) {
+	if _, ok := r.set[pos]; ok {
+		return
+	}
 	r.set[pos] = struct{}{}
+	r.order = append(r.order, pos)
 }
 
 func (r treePlacementRecord) empty() bool {
@@ -94,19 +105,13 @@ func (r treePlacementRecord) contains(pos cube.Pos) bool {
 	return ok
 }
 
+// sorted mirrors TreeDecorator.Context: the vanilla position sets are
+// java.util.HashSets copied into a list (HashSet iteration order) and then
+// stable-sorted by Y only.
 func (r treePlacementRecord) sorted() []cube.Pos {
-	positions := make([]cube.Pos, 0, len(r.set))
-	for pos := range r.set {
-		positions = append(positions, pos)
-	}
-	sort.Slice(positions, func(i, j int) bool {
-		if positions[i][1] != positions[j][1] {
-			return positions[i][1] < positions[j][1]
-		}
-		if positions[i][0] != positions[j][0] {
-			return positions[i][0] < positions[j][0]
-		}
-		return positions[i][2] < positions[j][2]
+	positions := javaHashSetOrder(r.order)
+	sort.SliceStable(positions, func(i, j int) bool {
+		return positions[i][1] < positions[j][1]
 	})
 	return positions
 }
@@ -152,6 +157,9 @@ func (g Generator) executeJavaTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeCon
 	rt := newTreeRuntime(g, c, pos, cfg, minY, maxY, rng)
 
 	treeHeight, _ := sampleTreeHeight(cfg.TrunkPlacer, rng)
+	if debugTreeTraceEnabled() {
+		fmt.Printf("TRACE tree @ %d %d %d height=%d type=%s\n", pos[0], pos[1], pos[2], treeHeight, cfg.TrunkPlacer.Type)
+	}
 	if treeHeight <= 0 {
 		return false
 	}
@@ -1524,13 +1532,18 @@ func (rt treeRuntime) lowestTrunkOrRootOfTree() []cube.Pos {
 
 func (rt *treeRuntime) placeBeehiveDecorator(probability float64) {
 	logs := rt.sortedLogs()
-	if len(logs) == 0 || rt.rng.NextDouble() >= probability {
+	// Vanilla BeehiveDecorator.place: the log emptiness check happens before
+	// the probability roll, which uses nextFloat (a single RNG draw). The
+	// nextInt(3) hive height roll only happens when there are no leaves.
+	if len(logs) == 0 || float64(rt.rng.NextFloat()) >= probability {
 		return
 	}
 	leaves := rt.sortedLeaves()
-	hiveY := min(logs[0][1]+1+int(rt.rng.NextInt(3)), logs[len(logs)-1][1])
+	var hiveY int
 	if len(leaves) != 0 {
 		hiveY = max(leaves[0][1]-1, logs[0][1]+1)
+	} else {
+		hiveY = min(logs[0][1]+1+int(rt.rng.NextInt(3)), logs[len(logs)-1][1])
 	}
 	spawnDirections := []treeDirection{treeEast, treeWest, treeSouth}
 	hivePlacements := make([]cube.Pos, 0, len(logs)*len(spawnDirections))
@@ -1548,6 +1561,12 @@ func (rt *treeRuntime) placeBeehiveDecorator(probability float64) {
 			beeNest, ok := world.BlockByName("minecraft:bee_nest", map[string]any{"direction": int32(3), "honey_level": int32(0)})
 			if ok {
 				_ = rt.setDecorationBlock(pos, beeNest)
+			}
+			// Vanilla stores 2+nextInt(2) bee occupants, each consuming a
+			// nextInt(599) roll for ticksInHive.
+			numBees := 2 + int(rt.rng.NextInt(2))
+			for i := 0; i < numBees; i++ {
+				_ = rt.rng.NextInt(599)
 			}
 			return
 		}
@@ -1982,6 +2001,125 @@ func (rt treeRuntime) chunkForPos(pos cube.Pos) (*chunk.Chunk, bool) {
 		return nil, false
 	}
 	return rt.c, true
+}
+
+// sturdyBelow mirrors FallenTreeFeature.isOverSolidGround: the block below
+// must have a sturdy up face (approximated by solid render).
+func (rt treeRuntime) sturdyBelow(pos cube.Pos) bool {
+	return rt.solidRender(pos.Side(cube.FaceDown))
+}
+
+// decorateFallenLogs mirrors FallenTreeFeature.decorateLogs: a decorator
+// context whose log list follows java HashSet iteration order stable-sorted
+// by Y, applied to each decorator in order.
+func (rt *treeRuntime) decorateFallenLogs(logs []cube.Pos, decorators []gen.FeatureDecorator) {
+	if len(decorators) == 0 || len(logs) == 0 {
+		return
+	}
+	ordered := javaHashSetOrder(logs)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i][1] < ordered[j][1] })
+	for _, decorator := range decorators {
+		if decorator.Type != "attached_to_logs" {
+			continue
+		}
+		var cfg struct {
+			Probability   float64           `json:"probability"`
+			BlockProvider gen.StateProvider `json:"block_provider"`
+			Directions    []string          `json:"directions"`
+		}
+		if json.Unmarshal(decorator.Data, &cfg) != nil {
+			continue
+		}
+		rt.placeAttachedToLogsAt(ordered, cfg.Probability, cfg.BlockProvider, cfg.Directions)
+	}
+}
+
+// placeAttachedToLogsAt mirrors AttachedToLogsDecorator.place over an
+// explicit log list.
+func (rt *treeRuntime) placeAttachedToLogsAt(logs []cube.Pos, probability float64, provider gen.StateProvider, directions []string) {
+	if len(directions) == 0 {
+		return
+	}
+	shuffled := make([]cube.Pos, len(logs))
+	copy(shuffled, logs)
+	treeShuffle(rt.rng, shuffled)
+	for _, logPos := range shuffled {
+		// Util.getRandom always consumes one bounded draw, even for a
+		// single-element direction list.
+		direction := directions[int(rt.rng.NextInt(uint32(len(directions))))]
+		placement := logPos.Add(treeDecoratorDirectionOffset(direction))
+		if float64(rt.rng.NextFloat()) <= probability && rt.isAir(placement) {
+			state, ok := rt.g.selectState(rt.c, provider, placement, rt.rng, rt.minY, rt.maxY)
+			if ok {
+				_ = rt.setDecorationState(placement, state)
+			}
+		}
+	}
+}
+
+func treeDecoratorDirectionOffset(direction string) cube.Pos {
+	switch direction {
+	case "up":
+		return cube.Pos{0, 1, 0}
+	case "down":
+		return cube.Pos{0, -1, 0}
+	case "north":
+		return cube.Pos{0, 0, -1}
+	case "south":
+		return cube.Pos{0, 0, 1}
+	case "west":
+		return cube.Pos{-1, 0, 0}
+	case "east":
+		return cube.Pos{1, 0, 0}
+	}
+	return cube.Pos{}
+}
+
+// javaHashSetOrder reproduces java.util.HashSet<BlockPos> iteration order for
+// the given insertion sequence: buckets scanned in table order, entries
+// within a bucket in insertion order, with HashMap's power-of-two resize
+// (threshold 0.75) preserving relative order on split. Duplicate positions
+// keep their first slot.
+func javaHashSetOrder(positions []cube.Pos) []cube.Pos {
+	capacity := 16
+	threshold := 12
+	buckets := make([][]cube.Pos, capacity)
+	hashes := make(map[cube.Pos]uint32, len(positions))
+	size := 0
+	spread := func(pos cube.Pos) uint32 {
+		h := uint32((pos[1]+pos[2]*31)*31 + pos[0])
+		return h ^ (h >> 16)
+	}
+insert:
+	for _, pos := range positions {
+		h := spread(pos)
+		idx := h & uint32(capacity-1)
+		for _, existing := range buckets[idx] {
+			if existing == pos {
+				continue insert
+			}
+		}
+		buckets[idx] = append(buckets[idx], pos)
+		hashes[pos] = h
+		size++
+		if size > threshold {
+			newCapacity := capacity * 2
+			newBuckets := make([][]cube.Pos, newCapacity)
+			for i := 0; i < capacity; i++ {
+				for _, entry := range buckets[i] {
+					nidx := hashes[entry] & uint32(newCapacity-1)
+					newBuckets[nidx] = append(newBuckets[nidx], entry)
+				}
+			}
+			capacity, buckets = newCapacity, newBuckets
+			threshold *= 2
+		}
+	}
+	out := make([]cube.Pos, 0, size)
+	for _, bucket := range buckets {
+		out = append(out, bucket...)
+	}
+	return out
 }
 
 func treeShuffle[T any](rng *gen.WorldgenRandom, values []T) {

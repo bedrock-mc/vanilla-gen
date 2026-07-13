@@ -395,6 +395,9 @@ func (g Generator) configuredFeatureDecorationMargin(ref gen.ConfiguredFeatureRe
 	switch feature.Type {
 	case "tree":
 		return 16
+	case "fallen_tree":
+		// Stump offset (up to 3) plus fallen log length (up to 13).
+		return 16
 	case "geode":
 		cfg, err := feature.Geode()
 		if err != nil {
@@ -496,7 +499,10 @@ func (g Generator) configuredFeatureDecorationMargin(ref gen.ConfiguredFeatureRe
 		if err != nil {
 			return 0
 		}
-		return g.placedFeatureDecorationMargin(cfg.Feature, seenPlaced, seenConfigured)
+		// RandomPatchFeature offsets each try by up to xzSpread blocks; the
+		// tries that land in neighbour chunks must still run (they consume
+		// provider RNG and write blocks there in vanilla).
+		return cfg.XZSpread + g.placedFeatureDecorationMargin(cfg.Feature, seenPlaced, seenConfigured)
 	case "vegetation_patch", "waterlogged_vegetation_patch":
 		var (
 			cfg gen.VegetationPatchConfig
@@ -580,7 +586,7 @@ func (g Generator) configuredFeatureRefNeedsDecorationRegion(ref gen.ConfiguredF
 	}
 
 	switch feature.Type {
-	case "tree", "geode", "fossil", "monster_room", "desert_well", "iceberg", "blue_ice", "ore", "scattered_ore", "disk", "seagrass":
+	case "tree", "fallen_tree", "geode", "fossil", "monster_room", "desert_well", "iceberg", "blue_ice", "ore", "scattered_ore", "disk", "seagrass":
 		return true
 	case "random_selector":
 		cfg, err := feature.RandomSelector()
@@ -624,7 +630,7 @@ func (g Generator) configuredFeatureRefNeedsDecorationRegion(ref gen.ConfiguredF
 		if err != nil {
 			return false
 		}
-		return g.placedFeatureRefNeedsDecorationRegion(cfg.Feature, seenPlaced, seenConfigured)
+		return cfg.XZSpread > 0 || g.placedFeatureRefNeedsDecorationRegion(cfg.Feature, seenPlaced, seenConfigured)
 	case "vegetation_patch", "waterlogged_vegetation_patch":
 		var (
 			cfg gen.VegetationPatchConfig

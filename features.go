@@ -218,8 +218,14 @@ func (g Generator) executeConfiguredFeature(c *chunk.Chunk, biomes sourceBiomeVo
 		for _, entry := range cfg.Features {
 			// RandomSelectorFeature rolls nextFloat (not nextDouble).
 			if rng.NextFloat() < float32(entry.Chance) {
+				if debugTreeTraceEnabled() {
+					fmt.Printf("TRACE sel @ %d %d %d -> %s\n", pos[0], pos[1], pos[2], entry.Feature.Name)
+				}
 				return g.executePlacedFeatureRef(c, biomes, pos, entry.Feature, topFeatureName, chunkX, chunkZ, minY, maxY, rng, depth+1)
 			}
+		}
+		if debugTreeTraceEnabled() {
+			fmt.Printf("TRACE sel @ %d %d %d -> default %s\n", pos[0], pos[1], pos[2], cfg.Default.Name)
 		}
 		return g.executePlacedFeatureRef(c, biomes, pos, cfg.Default, topFeatureName, chunkX, chunkZ, minY, maxY, rng, depth+1)
 	case "simple_random_selector":
@@ -1713,62 +1719,70 @@ func (g Generator) executeFreezeTopLayer(c *chunk.Chunk, biomes sourceBiomeVolum
 	return placedAny
 }
 
+// executeFallenTree ports vanilla FallenTreeFeature.place (1.21.5+):
+// a one-block stump is always placed at the origin, then a horizontal log of
+// logLength-2 blocks is placed 2+nextInt(2) blocks away in a random
+// horizontal direction if the whole log fits over (mostly) solid ground.
 func (g Generator) executeFallenTree(c *chunk.Chunk, pos cube.Pos, cfg gen.FallenTreeConfig, chunkX, chunkZ, minY, maxY int, rng *gen.WorldgenRandom) bool {
-	trunkState, ok := g.selectState(c, cfg.TrunkProvider, pos, rng, minY, maxY)
-	if !ok {
-		return false
-	}
-	length := max(1, g.sampleIntProvider(cfg.LogLength, rng))
+	rt := newTreeRuntime(g, c, pos, gen.TreeConfig{}, minY, maxY, rng)
 
-	validDirs := make([]cube.Pos, 0, 4)
-	for _, dir := range []cube.Pos{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}} {
-		end := pos.Add(cube.Pos{dir[0] * (length - 1), 0, dir[2] * (length - 1)})
-		if g.positionInChunk(end, chunkX, chunkZ, minY, maxY) {
-			validDirs = append(validDirs, dir)
-		}
+	// placeStump: one upright log at the origin, set unconditionally.
+	if state, ok := g.selectState(c, cfg.TrunkProvider, pos, rng, minY, maxY); ok {
+		_ = rt.setTrunkState(pos, state)
 	}
-	if len(validDirs) == 0 {
-		return false
-	}
-	dir := validDirs[int(rng.NextInt(uint32(len(validDirs))))]
-	if trunkState.Properties == nil {
-		trunkState.Properties = make(map[string]string, 1)
-	}
-	if dir[0] != 0 {
-		trunkState.Properties["axis"] = "x"
-	} else {
-		trunkState.Properties["axis"] = "z"
-	}
+	rt.decorateFallenLogs([]cube.Pos{pos}, cfg.StumpDecorators)
 
-	logBlock, ok := g.featureBlockFromState(trunkState, nil)
-	if !ok {
-		return false
-	}
+	// Direction.Plane.HORIZONTAL faces order: NORTH, EAST, SOUTH, WEST.
+	horizontal := [4]treeDirection{treeNorth, treeEast, treeSouth, treeWest}
+	dir := horizontal[int(rng.NextInt(4))]
+	logLength := g.sampleIntProvider(cfg.LogLength, rng) - 2
+	logStart := pos.Add(mulPos(dir.offset(), 2+int(rng.NextInt(2))))
 
-	var placedAny bool
-	trunkPositions := make([]cube.Pos, 0, length)
-	for i := 0; i < length; i++ {
-		candidate := pos.Add(cube.Pos{dir[0] * i, 0, dir[2] * i})
-		if !g.positionInChunk(candidate, chunkX, chunkZ, minY, maxY) {
+	// setGroundHeightForFallenLogStartPos: scan down up to 6 blocks starting
+	// one above the origin height.
+	logStart[1]++
+	for i := 0; i < 6; i++ {
+		if rt.validTreePos(logStart) && rt.sturdyBelow(logStart) {
 			break
 		}
-		if !g.isSolidInChunk(c, candidate.Side(cube.FaceDown), chunkX, chunkZ, minY, maxY) {
+		logStart[1]--
+	}
+
+	// canPlaceEntireFallenLog: every log position must be replaceable and at
+	// most 2 consecutive positions may hang over non-solid ground.
+	canPlace := true
+	gapInGround := 0
+	probe := logStart
+	for i := 0; i < logLength; i++ {
+		if !rt.validTreePos(probe) {
+			canPlace = false
 			break
 		}
-		currentRID := c.Block(uint8(candidate[0]&15), int16(candidate[1]), uint8(candidate[2]&15), 0)
-		currentBlock, _ := world.BlockByRuntimeID(currentRID)
-		if !g.canReplaceFeatureBlock(currentBlock, logBlock) {
-			break
+		if !rt.sturdyBelow(probe) {
+			gapInGround++
+			if gapInGround > 2 {
+				canPlace = false
+				break
+			}
+		} else {
+			gapInGround = 0
 		}
-		if g.setBlockStateDirect(c, candidate, trunkState) {
-			placedAny = true
-			trunkPositions = append(trunkPositions, candidate)
+		probe = probe.Add(dir.offset())
+	}
+
+	if canPlace {
+		logs := make([]cube.Pos, 0, logLength)
+		logPos := logStart
+		for i := 0; i < logLength; i++ {
+			if state, ok := g.selectState(c, cfg.TrunkProvider, logPos, rng, minY, maxY); ok {
+				_ = rt.setTrunkState(logPos, setTreeAxis(state, dir.axis()))
+			}
+			logs = append(logs, logPos)
+			logPos = logPos.Add(dir.offset())
 		}
+		rt.decorateFallenLogs(logs, cfg.LogDecorators)
 	}
-	if placedAny {
-		g.applyAttachedLogDecorators(c, trunkPositions, cfg.LogDecorators, rng, minY, maxY)
-	}
-	return placedAny
+	return true
 }
 
 func (g Generator) executeTree(c *chunk.Chunk, pos cube.Pos, cfg gen.TreeConfig, minY, maxY int, rng *gen.WorldgenRandom) bool {
@@ -6048,11 +6062,12 @@ func lerp(t, a, b float64) float64 {
 	return a + (b-a)*t
 }
 
+// signedSpread mirrors RandomPatchFeature's per-axis offset:
+// nextInt(spread+1) - nextInt(spread+1). Both draws always happen, even for
+// spread 0 (nextInt(1) still advances the RNG).
 func (g Generator) signedSpread(rng *gen.WorldgenRandom, spread int) int {
-	if spread <= 0 {
-		return 0
-	}
-	return int(rng.NextInt(uint32(spread*2+1))) - spread
+	bound := uint32(spread + 1)
+	return int(rng.NextInt(bound)) - int(rng.NextInt(bound))
 }
 
 func (g Generator) positionInChunk(pos cube.Pos, chunkX, chunkZ, minY, maxY int) bool {
