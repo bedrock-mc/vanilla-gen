@@ -89,6 +89,23 @@ func (g Generator) biomeAt(c *chunk.Chunk, localX, y, localZ int) gen.Biome {
 	return biomeFromRuntimeID(c.Biome(uint8(localX), int16(y), uint8(localZ)))
 }
 
+// zoomedBiomeAt mirrors vanilla level.getBiome(pos) during decoration: the
+// fuzzy 4x zoom over quart-resolution noise biomes. Quart Y is clamped to the
+// generated range like ChunkAccess.getNoiseBiome.
+func (g Generator) zoomedBiomeAt(x, y, z int) gen.Biome {
+	minQuartY := g.metadata.MinY >> 2
+	maxQuartY := minQuartY + (g.metadata.Height >> 2) - 1
+	return gen.FuzzyZoomBiome(g.biomeZoomSeed, x, y, z, func(quartX, quartY, quartZ int) gen.Biome {
+		if quartY < minQuartY {
+			quartY = minQuartY
+		}
+		if quartY > maxQuartY {
+			quartY = maxQuartY
+		}
+		return g.biomeSource.GetBiome(quartX<<2, quartY<<2, quartZ<<2)
+	})
+}
+
 func alignDown(value, multiple int) int {
 	remainder := value % multiple
 	if remainder < 0 {

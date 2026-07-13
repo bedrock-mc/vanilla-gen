@@ -28,6 +28,7 @@ type Generator struct {
 	dimension          world.Dimension
 	dimensionName      string
 	seed               int64
+	biomeZoomSeed      int64
 	activeTreeRegion   *treeDecorationRegion
 	structureStepOrder [][]structureStepEntry
 	graph              *gen.Graph
@@ -96,6 +97,7 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 		dimension:          dim,
 		dimensionName:      dimensionName,
 		seed:               seed,
+		biomeZoomSeed:      gen.ObfuscateSeed(seed),
 		structureStepOrder: structureStepOrder,
 		graph:              graph,
 		graphRoots:         roots,

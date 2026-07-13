@@ -3438,12 +3438,7 @@ func (g Generator) applyPlacementModifiers(c *chunk.Chunk, biomes sourceBiomeVol
 		case "biome":
 			next := make([]cube.Pos, 0, len(out))
 			for _, pos := range out {
-				localX := pos[0] - chunkX*16
-				localZ := pos[2] - chunkZ*16
-				if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
-					continue
-				}
-				if g.biomeGeneration.biomeHasFeature(biomes.biomeAt(localX, pos[1], localZ), topFeatureName) {
+				if g.biomeGeneration.biomeHasFeature(g.zoomedBiomeAt(pos[0], pos[1], pos[2]), topFeatureName) {
 					next = append(next, pos)
 				}
 			}
