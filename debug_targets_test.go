@@ -28,7 +28,7 @@ func TestDebugTargetPairs(t *testing.T) {
 		t.Fatalf("open region dir: %v", err)
 	}
 	chunkRange := 2
-	h := newChunkParityHarness(1)
+	h := newChunkParityHarness(parityWorldSeed(t))
 	r := h.g.dimension.Range()
 	count := 0
 	for cx := -chunkRange; cx < chunkRange; cx++ {
@@ -49,9 +49,9 @@ func TestDebugTargetPairs(t *testing.T) {
 						jname = strings.TrimPrefix(jname, "minecraft:")
 						lname := h.g.carverBlockName(c.Block(uint8(x), int16(y), uint8(z), 0))
 						if os.Getenv("DEBUG_SPAWNERS") != "" && (jname == "spawner" || lname == "mob_spawner") {
-						fmt.Printf("spawner java=%s local=%s @ %d %d %d\n", jname, lname, cx*16+x, y, cz*16+z)
-					}
-					if !sameBlockName(jname, lname) {
+							fmt.Printf("spawner java=%s local=%s @ %d %d %d\n", jname, lname, cx*16+x, y, cz*16+z)
+						}
+						if !sameBlockName(jname, lname) {
 							pair := jname + " -> " + lname
 							if targets[pair] {
 								fmt.Printf("%s @ %d %d %d\n", pair, cx*16+x, y, cz*16+z)
@@ -77,7 +77,7 @@ func TestDebugSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open region dir: %v", err)
 	}
-	h := newChunkParityHarness(1)
+	h := newChunkParityHarness(parityWorldSeed(t))
 	r := h.g.dimension.Range()
 	isAir := func(n string) bool { return n == "air" || n == "cave_air" || n == "void_air" }
 	norm := func(n string) string {
@@ -100,7 +100,7 @@ func TestDebugSurface(t *testing.T) {
 			for x := 0; x < 16; x++ {
 				for z := 0; z < 16; z++ {
 					columns++
-					jy, ly := r.Min() - 1, r.Min() - 1
+					jy, ly := r.Min()-1, r.Min()-1
 					var jtop, ltop string
 					for y := r.Max(); y >= r.Min(); y-- {
 						if jy < r.Min() {
@@ -164,7 +164,7 @@ func TestDebugTreePairs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open region dir: %v", err)
 	}
-	h := newChunkParityHarness(1)
+	h := newChunkParityHarness(parityWorldSeed(t))
 	r := h.g.dimension.Range()
 	treeish := func(n string) bool {
 		return strings.Contains(n, "log") || strings.Contains(n, "leaves") || strings.Contains(n, "sapling") ||

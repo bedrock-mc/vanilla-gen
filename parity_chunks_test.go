@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -102,7 +103,7 @@ func TestChunkParityBaseTerrain(t *testing.T) {
 		chunkRange = 8
 	}
 
-	h := newChunkParityHarness(1)
+	h := newChunkParityHarness(parityWorldSeed(t))
 	r := h.g.dimension.Range()
 
 	totalBlocks := 0
@@ -202,7 +203,7 @@ func TestChunkParityNames(t *testing.T) {
 	if os.Getenv("VANILLA_GT_FULL") != "" {
 		chunkRange = 8
 	}
-	h := newChunkParityHarness(1)
+	h := newChunkParityHarness(parityWorldSeed(t))
 	r := h.g.dimension.Range()
 	pairs := map[string]int{}
 	total := 0
@@ -268,4 +269,18 @@ func sameBlockName(java, local string) bool {
 		return true
 	}
 	return false
+}
+
+// parityWorldSeed selects the ground-truth world seed (VANILLA_GT_SEED,
+// default 1) so additional reference worlds exercise other biomes.
+func parityWorldSeed(t *testing.T) int64 {
+	v := os.Getenv("VANILLA_GT_SEED")
+	if v == "" {
+		return 1
+	}
+	seed, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		t.Fatalf("bad VANILLA_GT_SEED: %v", err)
+	}
+	return seed
 }
