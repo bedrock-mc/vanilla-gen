@@ -183,17 +183,21 @@ func (p *FloatProvider) UnmarshalJSON(data []byte) error {
 }
 
 func decodeCarverConfig[T any](f ConfiguredCarverDef, expectedTypes ...string) (T, error) {
-	var out T
 	for _, expectedType := range expectedTypes {
 		if f.Type == expectedType {
 			if f.decoded != nil {
 				return decodeCachedJSON[T](f.decoded, f.Type, f.Config)
 			}
-			if err := json.Unmarshal(f.Config, &out); err != nil {
-				return out, err
-			}
-			return out, nil
+			return decodeCarverConfigUncached[T](f.Config)
 		}
 	}
-	return out, fmt.Errorf("expected %s, got %s", strings.Join(expectedTypes, "/"), f.Type)
+	var zero T
+	return zero, fmt.Errorf("expected %s, got %s", strings.Join(expectedTypes, "/"), f.Type)
+}
+
+//go:noinline
+func decodeCarverConfigUncached[T any](data []byte) (T, error) {
+	var out T
+	err := json.Unmarshal(data, &out)
+	return out, err
 }

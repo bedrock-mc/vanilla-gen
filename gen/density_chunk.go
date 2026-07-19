@@ -8,6 +8,25 @@ type FinalDensityChunk struct {
 	corners    [5][5][49]float64
 }
 
+// AddCornerDensity applies a CPU-side correction to every interpolation
+// corner. Structure terrain adaptation uses this after the base density has
+// been evaluated by an accelerator.
+func (c *FinalDensityChunk) AddCornerDensity(sample func(blockX, blockY, blockZ int) float64) {
+	if c == nil || sample == nil {
+		return
+	}
+	for cornerX := 0; cornerX <= 4; cornerX++ {
+		blockX := c.baseX + cornerX*4
+		for cornerZ := 0; cornerZ <= 4; cornerZ++ {
+			blockZ := c.baseZ + cornerZ*4
+			for cornerY := 0; cornerY <= c.cellCountY; cornerY++ {
+				blockY := c.minY + cornerY*8
+				c.corners[cornerX][cornerZ][cornerY] += sample(blockX, blockY, blockZ)
+			}
+		}
+	}
+}
+
 func NewFinalDensityChunk(graph *Graph, chunkX, chunkZ, minY, maxY int, noises *NoiseRegistry, flat *FlatCacheGrid) *FinalDensityChunk {
 	return NewFinalDensityChunkWithEvaluator(
 		graph,

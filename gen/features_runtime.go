@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type GenerationStep uint8
@@ -30,14 +31,14 @@ type FeatureRegistry struct {
 }
 
 type typedJSONCache struct {
-	mu      sync.Mutex
-	entries map[string]typedJSONCacheEntry
+	mu    sync.Mutex
+	entry atomic.Pointer[typedJSONCacheEntry]
 }
 
 type typedJSONCacheEntry struct {
-	loaded bool
-	value  any
-	err    error
+	key   string
+	value any
+	err   error
 }
 
 type placedCacheEntry struct {
@@ -1300,6 +1301,18 @@ func (p BlockPredicate) MatchingBlockTag() (MatchingBlockTagPredicateConfig, err
 	return decodeTypedJSON[MatchingBlockTagPredicateConfig](p.Type, "matching_block_tag", p.Data, p.decoded)
 }
 
+func (p BlockPredicate) AllOf() (CompositePredicateConfig, error) {
+	return decodeTypedJSON[CompositePredicateConfig](p.Type, "all_of", p.Data, p.decoded)
+}
+
+func (p BlockPredicate) AnyOf() (CompositePredicateConfig, error) {
+	return decodeTypedJSON[CompositePredicateConfig](p.Type, "any_of", p.Data, p.decoded)
+}
+
+func (p BlockPredicate) InsideWorldBounds() (OffsetPredicateConfig, error) {
+	return decodeTypedJSON[OffsetPredicateConfig](p.Type, "inside_world_bounds", p.Data, p.decoded)
+}
+
 type MatchingBlocksPredicateConfig struct {
 	Blocks StringOrStrings `json:"blocks"`
 	Offset BlockPos        `json:"offset"`
@@ -1320,6 +1333,14 @@ type WouldSurvivePredicateConfig struct {
 
 type MatchingBlockTagPredicateConfig struct {
 	Tag    string   `json:"tag"`
+	Offset BlockPos `json:"offset"`
+}
+
+type CompositePredicateConfig struct {
+	Predicates []BlockPredicate `json:"predicates"`
+}
+
+type OffsetPredicateConfig struct {
 	Offset BlockPos `json:"offset"`
 }
 
@@ -1365,13 +1386,19 @@ func decodePlacement[T any](modifier PlacementModifier, expectedType string) (T,
 }
 
 func decodeTypedJSON[T any](actualType, expectedType string, data []byte, cache *typedJSONCache) (T, error) {
-	var out T
 	if actualType != expectedType {
-		return out, fmt.Errorf("expected %s, got %s", expectedType, actualType)
+		var zero T
+		return zero, fmt.Errorf("expected %s, got %s", expectedType, actualType)
 	}
 	if cache != nil {
 		return decodeCachedJSON[T](cache, expectedType, data)
 	}
+	return decodeTypedJSONUncached[T](data)
+}
+
+//go:noinline
+func decodeTypedJSONUncached[T any](data []byte) (T, error) {
+	var out T
 	if err := json.Unmarshal(data, &out); err != nil {
 		return out, err
 	}
@@ -1379,26 +1406,47 @@ func decodeTypedJSON[T any](actualType, expectedType string, data []byte, cache 
 }
 
 func newTypedJSONCache() *typedJSONCache {
-	return &typedJSONCache{entries: make(map[string]typedJSONCacheEntry, 1)}
+	return &typedJSONCache{}
 }
 
 func decodeCachedJSON[T any](c *typedJSONCache, key string, data []byte) (T, error) {
-	var out T
+	if entry := c.entry.Load(); entry != nil {
+		return cachedJSONValue[T](entry, key)
+	}
+	return decodeCachedJSONSlow[T](c, key, data)
+}
+
+func cachedJSONValue[T any](entry *typedJSONCacheEntry, key string) (T, error) {
+	var zero T
+	if entry.key != key {
+		return zero, fmt.Errorf("cached feature config key mismatch: have %s, want %s", entry.key, key)
+	}
+	if entry.err != nil {
+		return zero, entry.err
+	}
+	cached, ok := entry.value.(T)
+	if !ok {
+		return zero, fmt.Errorf("cached feature config type mismatch for %s", key)
+	}
+	return cached, nil
+}
+
+// decodeCachedJSONSlow isolates the escaping json.Unmarshal destination from
+// the lock-free cache-hit path. Keeping these paths in one generic function
+// causes the compiler to heap-allocate the (often large) config value on every
+// hit, even though decoding only happens once.
+//
+//go:noinline
+func decodeCachedJSONSlow[T any](c *typedJSONCache, key string, data []byte) (T, error) {
 	c.mu.Lock()
-	if entry, ok := c.entries[key]; ok && entry.loaded {
+	if entry := c.entry.Load(); entry != nil {
 		c.mu.Unlock()
-		if entry.err != nil {
-			return out, entry.err
-		}
-		cached, ok := entry.value.(T)
-		if !ok {
-			return out, fmt.Errorf("cached feature config type mismatch for %s", key)
-		}
-		return cached, nil
+		return cachedJSONValue[T](entry, key)
 	}
 
+	var out T
 	err := json.Unmarshal(data, &out)
-	c.entries[key] = typedJSONCacheEntry{loaded: true, value: out, err: err}
+	c.entry.Store(&typedJSONCacheEntry{key: key, value: out, err: err})
 	c.mu.Unlock()
 	return out, err
 }

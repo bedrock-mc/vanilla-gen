@@ -16,6 +16,19 @@ import (
 	"github.com/df-mc/dragonfly/server/world/chunk"
 )
 
+var (
+	seagrassFeatureState = gen.BlockState{Name: "seagrass"}
+	tallSeagrassLower    = gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "lower"}}
+	tallSeagrassUpper    = gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "upper"}}
+	kelpPlantState       = gen.BlockState{Name: "kelp_plant"}
+	kelpHeadStates       = [...]gen.BlockState{
+		{Name: "kelp", Properties: map[string]string{"age": "20"}},
+		{Name: "kelp", Properties: map[string]string{"age": "21"}},
+		{Name: "kelp", Properties: map[string]string{"age": "22"}},
+		{Name: "kelp", Properties: map[string]string{"age": "23"}},
+	}
+)
+
 func (g Generator) decorateFeatures(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int) {
 	if g.features == nil || g.biomeGeneration == nil {
 		return
@@ -41,6 +54,7 @@ func (g Generator) decorateFeatures(c *chunk.Chunk, biomes sourceBiomeVolume, ch
 			if needsRegion {
 				if treeRegion == nil {
 					treeRegion = newTreeDecorationRegion(g, c, biomes, chunkX, chunkZ, minY, maxY)
+					treeRegion.preloadSlots()
 				}
 				g.runPlacedFeatureAcrossRegion(treeRegion, step, featureName, featureIndex)
 				continue
@@ -106,6 +120,7 @@ func (g Generator) decorateFeaturesAndStructures(c *chunk.Chunk, biomes sourceBi
 					}
 					if treeRegion == nil {
 						treeRegion = newTreeDecorationRegion(g, c, biomes, chunkX, chunkZ, minY, maxY)
+						treeRegion.preloadSlots()
 					}
 					g.replaySourceFeature(treeRegion, sourceChunkX, sourceChunkZ, step, featureName, featureIndex)
 				}
@@ -150,18 +165,13 @@ func (g Generator) collectChunkBiomes(c *chunk.Chunk, biomes sourceBiomeVolume, 
 
 func (g Generator) collectPossibleFeatureBiomes(chunkX, chunkZ, minY, maxY int) []gen.Biome {
 	var seen biomeSet
-	startY := alignDown(minY, biomeCellSize)
 	for sampleChunkX := chunkX - 1; sampleChunkX <= chunkX+1; sampleChunkX++ {
 		for sampleChunkZ := chunkZ - 1; sampleChunkZ <= chunkZ+1; sampleChunkZ++ {
-			for localX := 0; localX < 16; localX += biomeCellSize {
-				worldX := sampleChunkX*16 + localX
-				for localZ := 0; localZ < 16; localZ += biomeCellSize {
-					worldZ := sampleChunkZ*16 + localZ
-					for y := startY; y <= maxY; y += biomeCellSize {
-						seen.add(g.biomeSource.GetBiome(worldX, y, worldZ))
-					}
-				}
-			}
+			key := chunkBiomeSetKey{chunkX: sampleChunkX, chunkZ: sampleChunkZ, minY: minY, maxY: maxY}
+			chunkSet := g.featureBiomeSets.LoadOrCompute(key, func() biomeSet {
+				return g.sampleFeatureBiomeSet(sampleChunkX, sampleChunkZ, minY, maxY)
+			})
+			seen.merge(chunkSet)
 		}
 	}
 
@@ -172,6 +182,10 @@ func (g Generator) collectPossibleFeatureBiomes(chunkX, chunkZ, minY, maxY int) 
 		}
 	}
 	return out
+}
+
+func (g Generator) sampleFeatureBiomeSet(chunkX, chunkZ, minY, maxY int) biomeSet {
+	return g.loadChunkBiomeVolume(chunkX, chunkZ, minY, maxY).set
 }
 
 func (g Generator) runPlacedFeature(c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int, step gen.GenerationStep, featureName string, featureIndex int, decorationSeed int64) {
@@ -633,14 +647,14 @@ func (g Generator) executeSeagrass(c *chunk.Chunk, pos cube.Pos, cfg gen.Seagras
 		}
 		upper := target.Side(cube.FaceUp)
 		if upper[1] <= maxY && g.positionInFeatureScope(upper, chunkX, chunkZ, minY, maxY) && g.isJavaWaterName(g.blockNameAt(c, upper)) {
-			_ = g.setBlockStateDirect(c, target, gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "lower"}})
-			_ = g.setBlockStateDirect(c, upper, gen.BlockState{Name: "tall_seagrass", Properties: map[string]string{"half": "upper"}})
+			_ = g.setBlockStateDirect(c, target, tallSeagrassLower)
+			_ = g.setBlockStateDirect(c, upper, tallSeagrassUpper)
 		}
 		// Vanilla reports success as soon as canSurvive passed, even when
 		// the upper block was not water and nothing was placed.
 		return true
 	}
-	_ = g.setBlockStateDirect(c, target, gen.BlockState{Name: "seagrass"})
+	_ = g.setBlockStateDirect(c, target, seagrassFeatureState)
 	return true
 }
 
@@ -674,17 +688,17 @@ func (g Generator) executeKelp(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, min
 		for i := 0; i <= height; i++ {
 			if waterAt(current) && waterAt(current.Side(cube.FaceUp)) && g.kelpCanSurviveAt(c, current, chunkX, chunkZ, minY, maxY) {
 				if i == height {
-					_ = g.setBlockStateDirect(c, current, gen.BlockState{Name: "kelp", Properties: map[string]string{"age": strconv.Itoa(int(rng.NextInt(4)) + 20)}})
+					_ = g.setBlockStateDirect(c, current, kelpHeadStates[rng.NextInt(4)])
 					placed++
 				} else {
-					_ = g.setBlockStateDirect(c, current, gen.BlockState{Name: "kelp_plant"})
+					_ = g.setBlockStateDirect(c, current, kelpPlantState)
 				}
 			} else if i > 0 {
 				below := current.Side(cube.FaceDown)
 				belowBelow := below.Side(cube.FaceDown)
 				if g.kelpCanSurviveAt(c, below, chunkX, chunkZ, minY, maxY) &&
 					(!g.positionInFeatureScope(belowBelow, chunkX, chunkZ, minY, maxY) || g.blockNameAt(c, belowBelow) != "kelp") {
-					_ = g.setBlockStateDirect(c, below, gen.BlockState{Name: "kelp", Properties: map[string]string{"age": strconv.Itoa(int(rng.NextInt(4)) + 20)}})
+					_ = g.setBlockStateDirect(c, below, kelpHeadStates[rng.NextInt(4)])
 					placed++
 				}
 				break
@@ -748,19 +762,18 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 	// decoration, which is exactly the proto-chunk state they hold.
 	probeFloor := func(worldX, worldZ int) int {
 		region := g.activeTreeRegion
-		key := oreProbeKey{chunkX: floorDiv(worldX, 16), chunkZ: floorDiv(worldZ, 16), localX: int8(worldX & 15), localZ: int8(worldZ & 15)}
 		if region != nil {
-			if floor, ok := region.oreProbeFloor[key]; ok {
+			if floor, ok := region.loadOreProbeFloor(worldX, worldZ); ok {
 				return floor
 			}
 		}
-		target := g.chunkForActiveTreePos(c, cube.Pos{worldX, 0, worldZ})
+		target := c
+		if worldX < chunkX*16 || worldX >= chunkX*16+16 || worldZ < chunkZ*16 || worldZ >= chunkZ*16+16 {
+			target = g.chunkForActiveTreePos(c, cube.Pos{worldX, 0, worldZ})
+		}
 		floor := g.columnHeightmapY(target, worldX&15, worldZ&15, "OCEAN_FLOOR", minY, maxY)
 		if region != nil {
-			if region.oreProbeFloor == nil {
-				region.oreProbeFloor = make(map[oreProbeKey]int, 256)
-			}
-			region.oreProbeFloor[key] = floor
+			region.storeOreProbeFloor(worldX, worldZ, floor)
 		}
 		return floor
 	}
@@ -778,11 +791,61 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 	}
 
 	size := cfg.Size
-	data := make([]float64, size*4)
+	var positions []orePositionOffset
+	if g.orePlans != nil {
+		key := orePlanKey{state: rng.Snapshot(), pos: pos, size: size, minY: minY, maxY: maxY}
+		plan := g.orePlans.LoadOrCompute(key, func() oreGeometryPlan {
+			planned := make([]orePositionOffset, 0, size*4)
+			planned = buildOreGeometry(planned, pos, size, x0, x1, y0, y1, z0, z1, xStart, yStart, zStart, sizeXZ, sizeY, minY, maxY, rng)
+			return oreGeometryPlan{positions: planned, endState: rng.Snapshot()}
+		})
+		rng.Restore(plan.endState)
+		positions = plan.positions
+	} else {
+		positions = acquireOrePositionScratch(size * 4)
+		positions = buildOreGeometry(positions, pos, size, x0, x1, y0, y1, z0, z1, xStart, yStart, zStart, sizeXZ, sizeY, minY, maxY, rng)
+		defer releaseOrePositionScratch(positions)
+	}
+
+	placed := false
+	for _, offset := range positions {
+		orePos := cube.Pos{pos[0] + int(offset.x), pos[1] + int(offset.y), pos[2] + int(offset.z)}
+		// ensureCanWrite: only positions we can materialize.
+		if !g.positionInFeatureScope(orePos, chunkX, chunkZ, minY, maxY) {
+			continue
+		}
+		targetChunk := c
+		if !g.positionInChunk(orePos, chunkX, chunkZ, minY, maxY) {
+			targetChunk = g.chunkForActiveTreePos(c, orePos)
+		}
+		currentRID := targetChunk.Block(uint8(orePos[0]&15), int16(orePos[1]), uint8(orePos[2]&15), 0)
+		for _, target := range cfg.Targets {
+			if !g.oreTargetMatchesRuntimeID(currentRID, target) {
+				continue
+			}
+			if cfg.DiscardChanceOnAirExposure <= 0.0 || g.canPlaceOreAt(c, orePos, cfg, chunkX, chunkZ, minY, maxY, rng) {
+				if g.setBlockStateDirectInChunk(targetChunk, orePos, target.State) {
+					placed = true
+				}
+			}
+			break
+		}
+	}
+	return placed
+}
+
+func buildOreGeometry(positions []orePositionOffset, origin cube.Pos, size int, x0, x1, y0, y1, z0, z1 float64, xStart, yStart, zStart, sizeXZ, sizeY, minY, maxY int, rng *gen.WorldgenRandom) []orePositionOffset {
+	var dataStorage [64 * 4]float64
+	data := dataStorage[:0]
+	if size*4 <= len(dataStorage) {
+		data = dataStorage[:size*4]
+	} else {
+		data = make([]float64, size*4)
+	}
 	for i := 0; i < size; i++ {
 		step := float32(i) / float32(size)
 		ss := rng.NextDouble() * float64(size) / 16.0
-		radius := ((float64(gen.MthSin(float32(math.Pi)*step)) + 1.0) * ss + 1.0) / 2.0
+		radius := ((float64(gen.MthSin(float32(math.Pi)*step))+1.0)*ss + 1.0) / 2.0
 		data[i*4+0] = lerp(float64(step), x0, x1)
 		data[i*4+1] = lerp(float64(step), y0, y1)
 		data[i*4+2] = lerp(float64(step), z0, z1)
@@ -813,8 +876,14 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 
 	// Vanilla uses a BitSet over the probe volume; a word slice avoids the
 	// per-position map allocations.
-	tested := make([]uint64, (sizeXZ*sizeXZ*sizeY+63)/64+1)
-	placed := false
+	var testedStorage [192]uint64
+	testedWords := (sizeXZ*sizeXZ*sizeY+63)/64 + 1
+	tested := testedStorage[:0]
+	if testedWords <= len(testedStorage) {
+		tested = testedStorage[:testedWords]
+	} else {
+		tested = make([]uint64, testedWords)
+	}
 	for i := 0; i < size; i++ {
 		radius := data[i*4+3]
 		if radius < 0.0 {
@@ -854,28 +923,12 @@ func (g Generator) executeOre(c *chunk.Chunk, pos cube.Pos, cfg gen.OreConfig, c
 						continue
 					}
 					tested[word] |= mask
-					orePos := cube.Pos{x, y, z}
-					// ensureCanWrite: only positions we can materialize.
-					if !g.positionInFeatureScope(orePos, chunkX, chunkZ, minY, maxY) {
-						continue
-					}
-					currentName := g.blockNameAt(c, orePos)
-					for _, target := range cfg.Targets {
-						if !g.oreTargetMatches(currentName, target) {
-							continue
-						}
-						if g.canPlaceOreAt(c, orePos, cfg, chunkX, chunkZ, minY, maxY, rng) {
-							if g.setBlockStateDirect(c, orePos, target.State) {
-								placed = true
-							}
-						}
-						break
-					}
+					positions = append(positions, orePositionOffset{int16(x - origin[0]), int16(y - origin[1]), int16(z - origin[2])})
 				}
 			}
 		}
 	}
-	return placed
+	return positions
 }
 
 // canPlaceOreAt ports OreFeature.canPlaceOre minus the (already checked)
@@ -927,13 +980,17 @@ func (g Generator) executeScatteredOre(c *chunk.Chunk, pos cube.Pos, cfg gen.Ore
 		if !g.positionInFeatureScope(orePos, chunkX, chunkZ, minY, maxY) {
 			continue
 		}
-		currentName := g.blockNameAt(c, orePos)
+		targetChunk := c
+		if !g.positionInChunk(orePos, chunkX, chunkZ, minY, maxY) {
+			targetChunk = g.chunkForActiveTreePos(c, orePos)
+		}
+		currentRID := targetChunk.Block(uint8(orePos[0]&15), int16(orePos[1]), uint8(orePos[2]&15), 0)
 		for _, target := range cfg.Targets {
-			if !g.oreTargetMatches(currentName, target) {
+			if !g.oreTargetMatchesRuntimeID(currentRID, target) {
 				continue
 			}
 			if g.canPlaceOreAt(c, orePos, cfg, chunkX, chunkZ, minY, maxY, rng) {
-				if g.setBlockStateDirect(c, orePos, target.State) {
+				if g.setBlockStateDirectInChunk(targetChunk, orePos, target.State) {
 					placed = true
 				}
 			}
@@ -1960,17 +2017,22 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 	holeCount := 0
 
 	solidAt := func(p cube.Pos) bool {
-		if !g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) {
+		rid, ok := g.runtimeIDInFeatureScope(c, p, chunkX, chunkZ, minY, maxY)
+		if !ok {
 			// Outside the world/region vanilla reads void air: not solid.
 			return false
 		}
-		return g.javaSolidAt(c, p)
+		return g.javaSolidRuntimeID(rid)
 	}
 	emptyAt := func(p cube.Pos) bool {
-		if !g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) {
+		rid, ok := g.runtimeIDInFeatureScope(c, p, chunkX, chunkZ, minY, maxY)
+		if !ok {
 			return false
 		}
-		name := g.blockNameAt(c, p)
+		if rid == g.airRID {
+			return true
+		}
+		name := g.blockNameForRuntimeID(rid)
 		return name == "air" || name == "cave_air"
 	}
 
@@ -1978,12 +2040,10 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 		for dy := -1; dy <= 4; dy++ {
 			for dz := minZ; dz <= maxZRoom; dz++ {
 				cursor := pos.Add(cube.Pos{dx, dy, dz})
-				solid := solidAt(cursor)
-				if dy == -1 && !solid {
-					return false
-				}
-				if dy == 4 && !solid {
-					return false
+				if dy == -1 || dy == 4 {
+					if !solidAt(cursor) {
+						return false
+					}
 				}
 				if (dx == minX || dx == maxXRoom || dz == minZ || dz == maxZRoom) && dy == 0 &&
 					emptyAt(cursor) && emptyAt(cursor.Side(cube.FaceUp)) {
@@ -1997,10 +2057,11 @@ func (g Generator) executeMonsterRoom(c *chunk.Chunk, pos cube.Pos, chunkX, chun
 	}
 
 	protected := func(p cube.Pos) bool {
-		if !g.positionInFeatureScope(p, chunkX, chunkZ, minY, maxY) {
+		rid, ok := g.runtimeIDInFeatureScope(c, p, chunkX, chunkZ, minY, maxY)
+		if !ok {
 			return true
 		}
-		return g.matchesFeatureBlockTag(g.blockNameAt(c, p), "features_cannot_replace")
+		return g.matchesFeatureBlockTag(g.blockNameForRuntimeID(rid), "features_cannot_replace")
 	}
 
 	for dx := minX; dx <= maxXRoom; dx++ {
@@ -3966,7 +4027,34 @@ func (g Generator) javaSolidName(name string) bool {
 }
 
 func (g Generator) javaSolidAt(c *chunk.Chunk, pos cube.Pos) bool {
-	return g.javaSolidName(g.blockNameAt(c, pos))
+	c = g.chunkForActiveTreePos(c, pos)
+	rid := c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0)
+	return g.javaSolidRuntimeID(rid)
+}
+
+func (g Generator) runtimeIDInFeatureScope(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ, minY, maxY int) (uint32, bool) {
+	if pos[1] < minY || pos[1] > maxY {
+		return 0, false
+	}
+	if pos[0] >= chunkX*16 && pos[0] < chunkX*16+16 && pos[2] >= chunkZ*16 && pos[2] < chunkZ*16+16 {
+		return c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0), true
+	}
+	if region := g.activeTreeRegion; region != nil {
+		posChunkX := floorDiv(pos[0], 16)
+		posChunkZ := floorDiv(pos[2], 16)
+		if _, ok := region.slotIndex(posChunkX, posChunkZ); !ok {
+			return 0, false
+		}
+		regionChunk, ok := region.chunkAt(posChunkX, posChunkZ)
+		if !ok {
+			return 0, false
+		}
+		return regionChunk.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0), true
+	}
+	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
+		return 0, false
+	}
+	return c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0), true
 }
 
 // isJavaWaterName reports whether the block is Java's Blocks.WATER, which
@@ -3996,6 +4084,32 @@ func (g Generator) heightmapPlacementYAtPos(c *chunk.Chunk, pos cube.Pos, kind s
 }
 
 func (g Generator) featureBlockFromState(state gen.BlockState, rng *gen.WorldgenRandom) (world.Block, bool) {
+	if rng == nil {
+		featureBlock, _, ok := g.featureBlockRuntimeFromState(state)
+		return featureBlock, ok
+	}
+	return g.featureBlockFromStateUncached(state, rng)
+}
+
+func (g Generator) featureBlockRuntimeFromState(state gen.BlockState) (world.Block, uint32, bool) {
+	key, cacheable := makeFeatureStateKey(state)
+	if cacheable {
+		if entry, ok := g.featureBlocks.Load(key); ok {
+			return entry.block, entry.rid, entry.ok
+		}
+	}
+	featureBlock, ok := g.featureBlockFromStateUncached(state, nil)
+	var rid uint32
+	if ok {
+		rid = g.blockRegistry.BlockRuntimeID(featureBlock)
+	}
+	if cacheable {
+		g.featureBlocks.Store(key, featureBlockCacheEntry{block: featureBlock, rid: rid, ok: ok})
+	}
+	return featureBlock, rid, ok
+}
+
+func (g Generator) featureBlockFromStateUncached(state gen.BlockState, rng *gen.WorldgenRandom) (world.Block, bool) {
 	state = normalizeFeatureState(state)
 
 	switch state.Name {
@@ -4616,26 +4730,22 @@ func (g Generator) testBlockPredicate(c *chunk.Chunk, pos cube.Pos, predicate ge
 		rid := c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0)
 		return g.isSolidRID(rid)
 	case "all_of":
-		var raw struct {
-			Predicates []gen.BlockPredicate `json:"predicates"`
-		}
-		if err := json.Unmarshal(predicate.Data, &raw); err != nil {
+		cfg, err := predicate.AllOf()
+		if err != nil {
 			return false
 		}
-		for _, child := range raw.Predicates {
+		for _, child := range cfg.Predicates {
 			if !g.testBlockPredicate(c, pos, child, chunkX, chunkZ, minY, maxY, rng) {
 				return false
 			}
 		}
 		return true
 	case "any_of":
-		var raw struct {
-			Predicates []gen.BlockPredicate `json:"predicates"`
-		}
-		if err := json.Unmarshal(predicate.Data, &raw); err != nil {
+		cfg, err := predicate.AnyOf()
+		if err != nil {
 			return false
 		}
-		for _, child := range raw.Predicates {
+		for _, child := range cfg.Predicates {
 			if g.testBlockPredicate(c, pos, child, chunkX, chunkZ, minY, maxY, rng) {
 				return true
 			}
@@ -4654,13 +4764,11 @@ func (g Generator) testBlockPredicate(c *chunk.Chunk, pos cube.Pos, predicate ge
 		}
 		return g.canBlockStateSurvive(c, pos, cfg.State, rng, minY, maxY)
 	case "inside_world_bounds":
-		var raw struct {
-			Offset gen.BlockPos `json:"offset"`
-		}
-		if err := json.Unmarshal(predicate.Data, &raw); err != nil {
+		cfg, err := predicate.InsideWorldBounds()
+		if err != nil {
 			return false
 		}
-		target := pos.Add(cube.Pos(raw.Offset))
+		target := pos.Add(cube.Pos(cfg.Offset))
 		return target[1] >= minY && target[1] <= maxY
 	default:
 		return false
@@ -4670,6 +4778,10 @@ func (g Generator) testBlockPredicate(c *chunk.Chunk, pos cube.Pos, predicate ge
 func (g Generator) blockNameAt(c *chunk.Chunk, pos cube.Pos) string {
 	c = g.chunkForActiveTreePos(c, pos)
 	rid := c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0)
+	return g.blockNameForRuntimeID(rid)
+}
+
+func (g Generator) blockNameForRuntimeID(rid uint32) string {
 	if name, ok := g.blockNameCache.Lookup(rid); ok {
 		return name
 	}
@@ -4686,7 +4798,8 @@ func (g Generator) blockNameAtSafe(c *chunk.Chunk, pos cube.Pos, chunkX, chunkZ,
 	if !g.positionInChunk(pos, chunkX, chunkZ, minY, maxY) {
 		return "air"
 	}
-	return g.blockNameAt(c, pos)
+	rid := c.Block(uint8(pos[0]&15), int16(pos[1]), uint8(pos[2]&15), 0)
+	return g.blockNameForRuntimeID(rid)
 }
 
 func worldBlockAtChunk(c *chunk.Chunk, pos cube.Pos) world.Block {
@@ -4966,7 +5079,7 @@ func (g Generator) columnHeightmapY(c *chunk.Chunk, localX, localZ int, kind str
 			if rid == g.airRID || rid == g.waterRID || rid == g.lavaRID {
 				return false
 			}
-			return g.isSolidRID(rid) && g.javaSolidName(g.carverBlockName(rid))
+			return g.isSolidRID(rid) && g.javaSolidRuntimeID(rid)
 		}); ok {
 			return min(y+1, maxY)
 		}
@@ -5201,22 +5314,35 @@ func blockColumnDirection(direction string) cube.Pos {
 }
 
 func (g Generator) setBlockStateDirect(c *chunk.Chunk, pos cube.Pos, state gen.BlockState) bool {
-	featureBlock, ok := g.featureBlockFromState(state, nil)
+	c = g.chunkForActiveTreePos(c, pos)
+	return g.setBlockStateDirectInChunk(c, pos, state)
+}
+
+func (g Generator) setBlockStateDirectInChunk(c *chunk.Chunk, pos cube.Pos, state gen.BlockState) bool {
+	featureBlock, rid, ok := g.featureBlockRuntimeFromState(state)
 	if !ok {
 		return false
 	}
-	return g.setFeatureBlock(c, pos, featureBlock)
+	return g.setFeatureBlockRuntimeIDInChunk(c, pos, featureBlock, rid)
 }
 
 func (g Generator) setFeatureBlock(c *chunk.Chunk, pos cube.Pos, featureBlock world.Block) bool {
 	c = g.chunkForActiveTreePos(c, pos)
+	return g.setFeatureBlockInChunk(c, pos, featureBlock)
+}
+
+func (g Generator) setFeatureBlockInChunk(c *chunk.Chunk, pos cube.Pos, featureBlock world.Block) bool {
+	return g.setFeatureBlockRuntimeIDInChunk(c, pos, featureBlock, g.blockRegistry.BlockRuntimeID(featureBlock))
+}
+
+func (g Generator) setFeatureBlockRuntimeIDInChunk(c *chunk.Chunk, pos cube.Pos, featureBlock world.Block, rid uint32) bool {
 	localX := uint8(pos[0] & 15)
 	localZ := uint8(pos[2] & 15)
 	y := int16(pos[1])
 
-	liquidRID, displaced := g.displacedLiquidRuntimeID(c, pos, featureBlock)
+	liquidRID, displaced := g.displacedLiquidRuntimeIDInChunk(c, pos, featureBlock)
 
-	c.SetBlock(localX, y, localZ, 0, runtimeIDForBlock(featureBlock))
+	c.SetBlock(localX, y, localZ, 0, rid)
 	if displaced {
 		c.SetBlock(localX, y, localZ, 1, liquidRID)
 	} else {
@@ -5227,6 +5353,10 @@ func (g Generator) setFeatureBlock(c *chunk.Chunk, pos cube.Pos, featureBlock wo
 
 func (g Generator) displacedLiquidRuntimeID(c *chunk.Chunk, pos cube.Pos, featureBlock world.Block) (uint32, bool) {
 	c = g.chunkForActiveTreePos(c, pos)
+	return g.displacedLiquidRuntimeIDInChunk(c, pos, featureBlock)
+}
+
+func (g Generator) displacedLiquidRuntimeIDInChunk(c *chunk.Chunk, pos cube.Pos, featureBlock world.Block) (uint32, bool) {
 	displacer, ok := featureBlock.(world.LiquidDisplacer)
 	if !ok {
 		return 0, false

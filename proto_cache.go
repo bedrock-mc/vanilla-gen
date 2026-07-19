@@ -15,15 +15,22 @@ import (
 // not regenerate the same base chunk repeatedly. Entries are immutable:
 // consumers receive clones.
 type protoChunkCache struct {
-	mu    sync.Mutex
-	cap   int
-	byPos map[[2]int]protoChunkEntry
-	order [][2]int
+	mu       sync.Mutex
+	cap      int
+	byPos    map[[2]int]protoChunkEntry
+	order    [][2]int
+	inFlight map[[2]int]*protoChunkFlight
 }
 
 type protoChunkEntry struct {
 	c      *chunk.Chunk
 	biomes sourceBiomeVolume
+}
+
+type protoChunkFlight struct {
+	done  chan struct{}
+	entry protoChunkEntry
+	ok    bool
 }
 
 func newProtoChunkCache(capacity int) *protoChunkCache {
@@ -32,31 +39,75 @@ func newProtoChunkCache(capacity int) *protoChunkCache {
 
 // get returns a mutable clone of the cached pre-decoration chunk.
 func (p *protoChunkCache) get(chunkX, chunkZ int) (*chunk.Chunk, sourceBiomeVolume, bool) {
+	key := [2]int{chunkX, chunkZ}
 	p.mu.Lock()
-	entry, ok := p.byPos[[2]int{chunkX, chunkZ}]
+	entry, ok := p.byPos[key]
+	flight := p.inFlight[key]
 	p.mu.Unlock()
-	if !ok {
+	if ok {
+		return entry.c.Clone(), entry.biomes, true
+	}
+	if flight == nil {
 		return nil, sourceBiomeVolume{}, false
 	}
-	return entry.c.Clone(), entry.biomes, true
+	<-flight.done
+	if !flight.ok {
+		return nil, sourceBiomeVolume{}, false
+	}
+	return flight.entry.c.Clone(), flight.entry.biomes, true
 }
 
-// store keeps a pristine clone of c.
-func (p *protoChunkCache) store(chunkX, chunkZ int, c *chunk.Chunk, biomes sourceBiomeVolume) {
+// reserve returns a cached entry, an existing computation to wait for, or a
+// new flight owned by the caller. It closes the check/compute race that would
+// otherwise let adjacent generation workers build the same base chunk.
+func (p *protoChunkCache) reserve(chunkX, chunkZ int) (protoChunkEntry, *protoChunkFlight, bool) {
 	key := [2]int{chunkX, chunkZ}
-	clone := c.Clone()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, ok := p.byPos[key]; ok {
-		return
+	if entry, ok := p.byPos[key]; ok {
+		return entry, nil, false
 	}
-	p.byPos[key] = protoChunkEntry{c: clone, biomes: biomes}
-	p.order = append(p.order, key)
+	if flight := p.inFlight[key]; flight != nil {
+		return protoChunkEntry{}, flight, false
+	}
+	if p.inFlight == nil {
+		p.inFlight = make(map[[2]int]*protoChunkFlight)
+	}
+	flight := &protoChunkFlight{done: make(chan struct{})}
+	p.inFlight[key] = flight
+	return protoChunkEntry{}, flight, true
+}
+
+func (p *protoChunkCache) complete(chunkX, chunkZ int, flight *protoChunkFlight, c *chunk.Chunk, biomes sourceBiomeVolume) {
+	key := [2]int{chunkX, chunkZ}
+	entry := protoChunkEntry{c: c.Clone(), biomes: biomes}
+	p.mu.Lock()
+	if stored, ok := p.byPos[key]; ok {
+		entry = stored
+	} else {
+		p.byPos[key] = entry
+		p.order = append(p.order, key)
+	}
 	for len(p.order) > p.cap {
 		oldest := p.order[0]
 		p.order = p.order[1:]
 		delete(p.byPos, oldest)
 	}
+	flight.entry = entry
+	flight.ok = true
+	delete(p.inFlight, key)
+	close(flight.done)
+	p.mu.Unlock()
+}
+
+func (p *protoChunkCache) abort(chunkX, chunkZ int, flight *protoChunkFlight) {
+	key := [2]int{chunkX, chunkZ}
+	p.mu.Lock()
+	if p.inFlight[key] == flight {
+		delete(p.inFlight, key)
+		close(flight.done)
+	}
+	p.mu.Unlock()
 }
 
 // xzIntCache memoizes pure functions of (x, z) such as the preliminary

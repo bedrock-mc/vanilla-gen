@@ -182,7 +182,8 @@ func (g *Graph) NewFlatCacheGrid(chunkX, chunkZ int, noises *NoiseRegistry) *Fla
 		firstQuartZ: chunkZ * 4,
 		values:      make([][5][5]float64, len(g.FlatCacheOrder)),
 	}
-	scratch := NewEvalScratch(g)
+	scratch := g.pooledScratch()
+	defer g.scratchPool.Put(scratch)
 	flatValues := make([]float64, len(g.FlatCacheOrder))
 
 	for qz := 0; qz < 5; qz++ {
@@ -216,7 +217,8 @@ func (g *FlatCacheGrid) Lookup(slot, blockX, blockZ int) float64 {
 func (g *Graph) NewColumnContext(blockX, blockZ int, noises *NoiseRegistry, flat *FlatCacheGrid) *ColumnContext {
 	values := make([]float64, len(g.Cache2DOrder))
 	computed := make([]bool, len(g.Cache2DOrder))
-	scratch := NewEvalScratch(g)
+	scratch := g.pooledScratch()
+	defer g.scratchPool.Put(scratch)
 	ctx := FunctionContext{BlockX: blockX, BlockY: 0, BlockZ: blockZ}
 
 	scratch.reset()

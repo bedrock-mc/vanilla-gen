@@ -41,20 +41,15 @@ type treeDecorationRegion struct {
 	minY         int
 	maxY         int
 	centerChunk  *chunk.Chunk
-	slots        map[[2]int]treeDecorationRegionSlot
+	slots        [9]treeDecorationRegionSlot
 
-	// oreProbeFloor memoizes OCEAN_FLOOR heightmap probes for OreFeature's
-	// placement pre-check, keyed by the replayed chunk position and clamped
-	// local column. Ore features only ever replace motion-blocking blocks
-	// with motion-blocking blocks, so values cannot change while ore
-	// features run; the memo is dropped as soon as any other feature type
-	// executes.
-	oreProbeFloor map[oreProbeKey]int
-}
-
-type oreProbeKey struct {
-	chunkX, chunkZ int
-	localX, localZ int8
+	// Ore features only replace motion-blocking blocks with motion-blocking
+	// blocks, so OCEAN_FLOOR probes remain valid until a non-ore feature runs.
+	// A fixed 3x3x16x16 table avoids a large short-lived hash map per target.
+	oreProbeFloor  [9 * 16 * 16]int16
+	oreProbeMarks  [9 * 16 * 16]uint16
+	oreProbeEpoch  uint16
+	oreProbeActive bool
 }
 
 type treeDecorationRegionSlot struct {
@@ -64,25 +59,102 @@ type treeDecorationRegionSlot struct {
 
 func newTreeDecorationRegion(g Generator, c *chunk.Chunk, biomes sourceBiomeVolume, chunkX, chunkZ, minY, maxY int) *treeDecorationRegion {
 	region := &treeDecorationRegion{
-		g:            g,
-		centerChunkX: chunkX,
-		centerChunkZ: chunkZ,
-		minY:         minY,
-		maxY:         maxY,
-		centerChunk:  c,
-		slots:        make(map[[2]int]treeDecorationRegionSlot, 9),
+		g:             g,
+		centerChunkX:  chunkX,
+		centerChunkZ:  chunkZ,
+		minY:          minY,
+		maxY:          maxY,
+		centerChunk:   c,
+		oreProbeEpoch: 1,
 	}
 	region.set(chunkX, chunkZ, c, biomes)
 	return region
 }
 
+// preloadSlots prepares the immutable pre-decoration neighbours concurrently.
+// Feature replay remains sequential; this only overlaps independent density,
+// surface, biome and carving work that lazy ensureSlot calls would otherwise
+// perform one neighbour at a time.
+func (r *treeDecorationRegion) preloadSlots() {
+	var wg sync.WaitGroup
+	for chunkZ := r.centerChunkZ - 1; chunkZ <= r.centerChunkZ+1; chunkZ++ {
+		for chunkX := r.centerChunkX - 1; chunkX <= r.centerChunkX+1; chunkX++ {
+			if chunkX == r.centerChunkX && chunkZ == r.centerChunkZ {
+				continue
+			}
+			wg.Add(1)
+			go func(chunkX, chunkZ int) {
+				defer wg.Done()
+				_, _ = r.ensureSlot(chunkX, chunkZ)
+			}(chunkX, chunkZ)
+		}
+	}
+	wg.Wait()
+}
+
 func (r *treeDecorationRegion) set(chunkX, chunkZ int, c *chunk.Chunk, biomes sourceBiomeVolume) {
-	r.slots[[2]int{chunkX, chunkZ}] = treeDecorationRegionSlot{chunk: c, biomes: biomes}
+	if index, ok := r.slotIndex(chunkX, chunkZ); ok {
+		r.slots[index] = treeDecorationRegionSlot{chunk: c, biomes: biomes}
+	}
 }
 
 func (r *treeDecorationRegion) slot(chunkX, chunkZ int) (treeDecorationRegionSlot, bool) {
-	slot, ok := r.slots[[2]int{chunkX, chunkZ}]
-	return slot, ok
+	index, ok := r.slotIndex(chunkX, chunkZ)
+	if !ok || r.slots[index].chunk == nil {
+		return treeDecorationRegionSlot{}, false
+	}
+	return r.slots[index], true
+}
+
+func (r *treeDecorationRegion) slotIndex(chunkX, chunkZ int) (int, bool) {
+	dx := chunkX - r.centerChunkX
+	dz := chunkZ - r.centerChunkZ
+	if dx < -1 || dx > 1 || dz < -1 || dz > 1 {
+		return 0, false
+	}
+	return (dz+1)*3 + dx + 1, true
+}
+
+func (r *treeDecorationRegion) oreProbeIndex(worldX, worldZ int) (int, bool) {
+	slot, ok := r.slotIndex(floorDiv(worldX, 16), floorDiv(worldZ, 16))
+	if !ok {
+		return 0, false
+	}
+	return slot*16*16 + (worldZ&15)*16 + (worldX & 15), true
+}
+
+func (r *treeDecorationRegion) loadOreProbeFloor(worldX, worldZ int) (int, bool) {
+	if !r.oreProbeActive {
+		return 0, false
+	}
+	index, ok := r.oreProbeIndex(worldX, worldZ)
+	if !ok || r.oreProbeMarks[index] != r.oreProbeEpoch {
+		return 0, false
+	}
+	return int(r.oreProbeFloor[index]), true
+}
+
+func (r *treeDecorationRegion) storeOreProbeFloor(worldX, worldZ, floor int) {
+	index, ok := r.oreProbeIndex(worldX, worldZ)
+	if !ok {
+		return
+	}
+	r.oreProbeFloor[index] = int16(floor)
+	r.oreProbeMarks[index] = r.oreProbeEpoch
+	r.oreProbeActive = true
+}
+
+func (r *treeDecorationRegion) invalidateOreProbeFloor() {
+	if !r.oreProbeActive {
+		return
+	}
+	r.oreProbeActive = false
+	if r.oreProbeEpoch == ^uint16(0) {
+		clear(r.oreProbeMarks[:])
+		r.oreProbeEpoch = 1
+		return
+	}
+	r.oreProbeEpoch++
 }
 
 func (r *treeDecorationRegion) contains(pos cube.Pos) bool {
@@ -95,29 +167,34 @@ func (r *treeDecorationRegion) contains(pos cube.Pos) bool {
 }
 
 func (r *treeDecorationRegion) ensureSlot(chunkX, chunkZ int) (treeDecorationRegionSlot, bool) {
-	if abs(chunkX-r.centerChunkX) > 1 || abs(chunkZ-r.centerChunkZ) > 1 {
+	index, inRegion := r.slotIndex(chunkX, chunkZ)
+	if !inRegion {
 		return treeDecorationRegionSlot{}, false
 	}
-	if slot, ok := r.slot(chunkX, chunkZ); ok {
+	if slot := r.slots[index]; slot.chunk != nil {
 		return slot, true
 	}
 	if r.g.protoChunks != nil {
 		if cached, biomes, ok := r.g.protoChunks.get(chunkX, chunkZ); ok {
 			slot := treeDecorationRegionSlot{chunk: cached, biomes: biomes}
-			r.set(chunkX, chunkZ, cached, biomes)
+			r.slots[index] = slot
 			return slot, true
 		}
 	}
 	neighbor := chunk.New(r.g.blockRegistry, cube.Range{r.minY, r.maxY})
 	neighborBiomes, _, _, _, _ := r.g.prepareChunkForDecoration(world.ChunkPos{int32(chunkX), int32(chunkZ)}, neighbor)
 	slot := treeDecorationRegionSlot{chunk: neighbor, biomes: neighborBiomes}
-	r.set(chunkX, chunkZ, neighbor, neighborBiomes)
+	r.slots[index] = slot
 	return slot, true
 }
 
 func (r *treeDecorationRegion) chunkAtPos(pos cube.Pos) (*chunk.Chunk, bool) {
 	chunkX := floorDiv(pos[0], 16)
 	chunkZ := floorDiv(pos[2], 16)
+	return r.chunkAt(chunkX, chunkZ)
+}
+
+func (r *treeDecorationRegion) chunkAt(chunkX, chunkZ int) (*chunk.Chunk, bool) {
 	if chunkX == r.centerChunkX && chunkZ == r.centerChunkZ {
 		if r.centerChunk == nil {
 			if slot, ok := r.slot(chunkX, chunkZ); ok {
@@ -134,21 +211,24 @@ func (r *treeDecorationRegion) chunkAtPos(pos cube.Pos) (*chunk.Chunk, bool) {
 }
 
 func (g Generator) chunkForActiveTreePos(c *chunk.Chunk, pos cube.Pos) *chunk.Chunk {
-	if g.activeTreeRegion == nil {
+	region := g.activeTreeRegion
+	if region == nil {
 		return c
 	}
-	if floorDiv(pos[0], 16) == g.activeTreeRegion.centerChunkX && floorDiv(pos[2], 16) == g.activeTreeRegion.centerChunkZ {
-		if g.activeTreeRegion.centerChunk == nil {
-			if slot, ok := g.activeTreeRegion.slot(g.activeTreeRegion.centerChunkX, g.activeTreeRegion.centerChunkZ); ok {
-				g.activeTreeRegion.centerChunk = slot.chunk
+	chunkX := floorDiv(pos[0], 16)
+	chunkZ := floorDiv(pos[2], 16)
+	if chunkX == region.centerChunkX && chunkZ == region.centerChunkZ {
+		if region.centerChunk == nil {
+			if slot, ok := region.slot(region.centerChunkX, region.centerChunkZ); ok {
+				region.centerChunk = slot.chunk
 			}
 		}
-		if g.activeTreeRegion.centerChunk == nil || c == g.activeTreeRegion.centerChunk {
+		if region.centerChunk == nil || c == region.centerChunk {
 			return c
 		}
-		return g.activeTreeRegion.centerChunk
+		return region.centerChunk
 	}
-	if regionChunk, ok := g.activeTreeRegion.chunkAtPos(pos); ok {
+	if regionChunk, ok := region.chunkAt(chunkX, chunkZ); ok {
 		return regionChunk
 	}
 	return c
@@ -157,8 +237,8 @@ func (g Generator) chunkForActiveTreePos(c *chunk.Chunk, pos cube.Pos) *chunk.Ch
 func (g Generator) runPlacedFeatureAcrossRegion(region *treeDecorationRegion, step gen.GenerationStep, featureName string, featureIndex int) {
 	// Any non-ore feature may alter column heights, so drop the ore probe
 	// heightmap memo (see treeDecorationRegion.oreProbeFloor).
-	if region.oreProbeFloor != nil && !g.placedFeatureIsOre(featureName) {
-		region.oreProbeFloor = nil
+	if region.oreProbeActive && !g.placedFeatureIsOre(featureName) {
+		region.invalidateOreProbeFloor()
 	}
 	if g.placedFeatureNeedsReplayAcrossRegion(featureName) {
 		g.runPlacedTreeFeatureAcrossRegion(region, step, featureName, featureIndex)

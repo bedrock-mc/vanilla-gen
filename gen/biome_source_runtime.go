@@ -10,6 +10,14 @@ type BiomeSource interface {
 	GetBiome(x, y, z int) Biome
 }
 
+// BatchBiomeSource can resolve many independent biome samples in one call.
+// GPU-backed sources use this to amortize dispatch overhead; callers should
+// retain the scalar BiomeSource path for small queries.
+type BatchBiomeSource interface {
+	BiomeSource
+	GetBiomes(points []FunctionContext, dst []Biome)
+}
+
 type presetBiomeSource struct {
 	preset      string
 	noise       BiomeNoise
@@ -17,8 +25,10 @@ type presetBiomeSource struct {
 	graphRoots  [6]int
 	noises      *NoiseRegistry
 	rtree       *climateRTree
-	cache       sync.Map
+	cache       biomeCache
 	scratchPool *sync.Pool
+	accelerator ComputeAccelerator
+	batchPool   sync.Pool
 }
 
 var (
@@ -35,7 +45,41 @@ func overworldClimateRTree() *climateRTree {
 
 type endBiomeSource struct {
 	erosion EndIslandDensity
-	cache   sync.Map
+	cache   biomeCache
+}
+
+const biomeCacheShardCount = 64
+
+type biomeCacheShard struct {
+	mu     sync.RWMutex
+	values map[int64]Biome
+}
+
+type biomeCache [biomeCacheShardCount]biomeCacheShard
+
+func (c *biomeCache) shard(key int64) *biomeCacheShard {
+	hash := uint64(key)
+	hash ^= hash >> 21
+	hash ^= hash >> 42
+	return &c[hash&(biomeCacheShardCount-1)]
+}
+
+func (c *biomeCache) Load(key int64) (Biome, bool) {
+	shard := c.shard(key)
+	shard.mu.RLock()
+	biome, ok := shard.values[key]
+	shard.mu.RUnlock()
+	return biome, ok
+}
+
+func (c *biomeCache) Store(key int64, biome Biome) {
+	shard := c.shard(key)
+	shard.mu.Lock()
+	if shard.values == nil {
+		shard.values = make(map[int64]Biome)
+	}
+	shard.values[key] = biome
+	shard.mu.Unlock()
 }
 
 // biomeCacheKey packs quart coordinates into one int64 for cheap hashing on
@@ -56,6 +100,13 @@ type climateParameterPoint struct {
 }
 
 func NewBiomeSource(seed int64, registry *WorldgenRegistry, name string) (BiomeSource, error) {
+	return NewBiomeSourceWithAccelerator(seed, registry, name, nil)
+}
+
+// NewBiomeSourceWithAccelerator creates a biome source that batches overworld
+// climate samples through accelerator. It falls back to the scalar CPU path
+// if a runtime submission fails.
+func NewBiomeSourceWithAccelerator(seed int64, registry *WorldgenRegistry, name string, accelerator ComputeAccelerator) (BiomeSource, error) {
 	if registry == nil {
 		registry = NewWorldgenRegistry()
 	}
@@ -86,11 +137,73 @@ func NewBiomeSource(seed int64, registry *WorldgenRegistry, name string) (BiomeS
 			preset: def.Preset, noise: NewBiomeNoise(seed), graph: graph, graphRoots: roots,
 			noises: noises, rtree: overworldClimateRTree(),
 			scratchPool: &sync.Pool{New: func() any { return NewEvalScratch(graph) }},
+			accelerator: accelerator,
 		}, nil
 	case "nether":
 		return &presetBiomeSource{preset: def.Preset, noise: NewBiomeNoise(seed)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported biome source preset %q", def.Preset)
+	}
+}
+
+type biomeBatchScratch struct {
+	points  []FunctionContext
+	indexes []int
+	biomes  []Biome
+}
+
+func (s *presetBiomeSource) GetBiomes(points []FunctionContext, dst []Biome) {
+	if len(dst) < len(points) {
+		panic("gen: biome batch destination too small")
+	}
+	if s.accelerator == nil || s.preset != "overworld" || len(points) < 64 {
+		for i, point := range points {
+			dst[i] = s.GetBiome(point.BlockX, point.BlockY, point.BlockZ)
+		}
+		return
+	}
+
+	var scratch *biomeBatchScratch
+	if pooled := s.batchPool.Get(); pooled != nil {
+		scratch = pooled.(*biomeBatchScratch)
+	} else {
+		scratch = &biomeBatchScratch{}
+	}
+	defer func() {
+		scratch.points = scratch.points[:0]
+		scratch.indexes = scratch.indexes[:0]
+		scratch.biomes = scratch.biomes[:0]
+		s.batchPool.Put(scratch)
+	}()
+	for i, point := range points {
+		key := biomeCacheKey(point.BlockX, point.BlockY, point.BlockZ)
+		if cached, ok := s.cache.Load(key); ok {
+			dst[i] = cached
+			continue
+		}
+		scratch.points = append(scratch.points, point)
+		scratch.indexes = append(scratch.indexes, i)
+	}
+	if len(scratch.points) == 0 {
+		return
+	}
+	if cap(scratch.biomes) < len(scratch.points) {
+		scratch.biomes = make([]Biome, len(scratch.points))
+	} else {
+		scratch.biomes = scratch.biomes[:len(scratch.points)]
+	}
+	if err := s.accelerator.SampleBiomes(scratch.points, scratch.biomes); err != nil {
+		for _, index := range scratch.indexes {
+			point := points[index]
+			dst[index] = s.GetBiome(point.BlockX, point.BlockY, point.BlockZ)
+		}
+		return
+	}
+	for i, index := range scratch.indexes {
+		biome := scratch.biomes[i]
+		point := points[index]
+		s.cache.Store(biomeCacheKey(point.BlockX, point.BlockY, point.BlockZ), biome)
+		dst[index] = biome
 	}
 }
 
@@ -101,12 +214,16 @@ func (s *presetBiomeSource) SampleClimate(x, y, z int) [6]int64 {
 		if s.scratchPool != nil {
 			scratch = s.scratchPool.Get().(*EvalScratch)
 			defer s.scratchPool.Put(scratch)
+		} else {
+			scratch = NewEvalScratch(s.graph)
 		}
+		scratch.reset()
 		var climate [6]int64
 		for i, root := range s.graphRoots {
 			// Climate.target casts to float and quantizeCoord multiplies in
-			// float32 before truncating.
-			climate[i] = int64(float32(s.graph.Eval(root, ctx, s.noises, nil, nil, scratch)) * 10000.0)
+			// float32 before truncating. Keep one memoization generation for all
+			// six roots: their shared shift noises and splines are pure at ctx.
+			climate[i] = int64(float32(s.graph.evalNormal(root, ctx, s.noises, nil, nil, scratch)) * 10000.0)
 		}
 		return climate
 	}
@@ -116,7 +233,7 @@ func (s *presetBiomeSource) SampleClimate(x, y, z int) [6]int64 {
 func (s *presetBiomeSource) GetBiome(x, y, z int) Biome {
 	key := biomeCacheKey(x, y, z)
 	if cached, ok := s.cache.Load(key); ok {
-		return cached.(Biome)
+		return cached
 	}
 	climate := s.SampleClimate(x, y, z)
 	var biome Biome
@@ -141,7 +258,7 @@ func (s *endBiomeSource) SampleClimate(x, y, z int) [6]int64 {
 func (s *endBiomeSource) GetBiome(x, y, z int) Biome {
 	key := biomeCacheKey(x, y, z)
 	if cached, ok := s.cache.Load(key); ok {
-		return cached.(Biome)
+		return cached
 	}
 	chunkX := x >> 4
 	chunkZ := z >> 4

@@ -2,7 +2,9 @@ package gen
 
 import (
 	"encoding/json"
+	"math"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -75,7 +77,6 @@ func TestLegacyRandomMatchesJava(t *testing.T) {
 	}
 }
 
-
 func TestWorldgenRandomLegacyMatchesJava(t *testing.T) {
 	fx := loadRandomFixture(t)
 
@@ -105,5 +106,40 @@ func TestWorldgenRandomXoroshiroMatchesJava(t *testing.T) {
 		if got := int64(rng.NextInt(16)); got != want {
 			t.Fatalf("feature nextInt[%d] = %d, want %d", i, got, want)
 		}
+	}
+}
+
+func TestWorldgenRandomSnapshotRestore(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		new  func() *WorldgenRandom
+	}{
+		{name: "xoroshiro", new: func() *WorldgenRandom { return NewWorldgenRandomXoroshiro(0x12345678) }},
+		{name: "legacy", new: func() *WorldgenRandom { return NewWorldgenRandomLegacy(0x12345678) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rng := test.new()
+			_ = rng.NextInt(37)
+			_ = rng.NextGaussian()
+			state := rng.Snapshot()
+			want := []uint64{
+				rng.NextLong(),
+				uint64(rng.NextInt(1_000_003)),
+				math.Float64bits(rng.NextDouble()),
+				math.Float64bits(rng.NextGaussian()),
+				math.Float64bits(rng.NextGaussian()),
+			}
+			rng.Restore(state)
+			got := []uint64{
+				rng.NextLong(),
+				uint64(rng.NextInt(1_000_003)),
+				math.Float64bits(rng.NextDouble()),
+				math.Float64bits(rng.NextGaussian()),
+				math.Float64bits(rng.NextGaussian()),
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("restored stream mismatch:\n got %x\nwant %x", got, want)
+			}
+		})
 	}
 }

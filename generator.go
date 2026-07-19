@@ -1,9 +1,9 @@
 package vanilla
 
 import (
-	"sync/atomic"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	gen "github.com/bedrock-mc/vanilla-gen/gen"
@@ -52,8 +52,14 @@ type Generator struct {
 	templateBlockCache *stringRIDCache
 	blockNameCache     *runtimeIDNameCache
 	featureNoiseCache  *doublePerlinNoiseCache
+	featureBiomeSets   *chunkBiomeSetCache
+	biomeVolumes       *chunkBiomeVolumeCache
+	featureBlocks      *featureBlockCache
+	oreRuntime         *oreRuntimeData
+	orePlans           *orePlanCache
 	protoChunks        *protoChunkCache
 	prelimLevels       *xzIntCache
+	acceleration       *accelerationState
 	finalDensityScalar gen.DensityScalarEvaluator
 	finalDensityVector gen.DensityVectorEvaluator
 	airRID             uint32
@@ -71,20 +77,43 @@ func New(seed int64) Generator {
 }
 
 func NewForDimension(seed int64, dim world.Dimension) Generator {
+	g, err := NewForDimensionWithConfig(seed, dim, GeneratorConfig{})
+	if err != nil {
+		panic(err)
+	}
+	return g
+}
+
+// NewWithConfig creates an overworld generator with explicit acceleration
+// configuration.
+func NewWithConfig(seed int64, cfg GeneratorConfig) (Generator, error) {
+	return NewForDimensionWithConfig(seed, world.Overworld, cfg)
+}
+
+// NewForDimensionWithConfig creates a generator for dim. Requiring OpenCL
+// returns an error when no suitable GPU is available; automatic mode records
+// the reason and transparently uses the CPU.
+func NewForDimensionWithConfig(seed int64, dim world.Dimension, cfg GeneratorConfig) (Generator, error) {
 	world.DefaultBlockRegistry.Finalize()
 	noises := gen.NewNoiseRegistry(seed)
 	worldgen, structureTemplates, structureResolver := sharedStructureResources()
 	dimensionName, graph, roots, surfaceRuntime, forceBottomBedrock, scalar, vector := dimensionRuntime(seed, dim, noises, worldgen)
-	biomeSource, err := gen.NewBiomeSource(seed, worldgen, dimensionName)
+	acceleration, err := newAccelerationState(dim, noises, cfg.Acceleration)
 	if err != nil {
-		panic(err)
+		return Generator{}, err
+	}
+	biomeSource, err := gen.NewBiomeSourceWithAccelerator(seed, worldgen, dimensionName, acceleration.computeBackend())
+	if err != nil {
+		_ = acceleration.Close()
+		return Generator{}, err
 	}
 	if surfaceRuntime == nil {
 		surfaceRuntime = dimensionSurfaceRuntime(seed, dim, noises, biomeSource)
 	}
 	metadata, err := worldgen.DimensionMetadata("minecraft:" + dimensionName)
 	if err != nil {
-		panic(err)
+		_ = acceleration.Close()
+		return Generator{}, err
 	}
 	structurePlanners := sharedStructurePlanners(worldgen, structureTemplates, dim)
 	structureStepOrder := buildStructureStepOrder(structurePlanners)
@@ -95,7 +124,7 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 	structureResolver.prewarmJigsawCandidates(structurePlanners)
 	defaultBlockRID := runtimeIDForDimensionState(metadata.DefaultBlock)
 	defaultFluidRID := runtimeIDForDimensionState(metadata.DefaultFluid)
-	return Generator{
+	g := Generator{
 		blockRegistry:      world.DefaultBlockRegistry,
 		dimension:          dim,
 		dimensionName:      dimensionName,
@@ -122,8 +151,14 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 		templateBlockCache: newStringRIDCache(),
 		blockNameCache:     newRuntimeIDNameCache(),
 		featureNoiseCache:  newDoublePerlinNoiseCache(),
+		featureBiomeSets:   newChunkBiomeSetCache(16 * 1024),
+		biomeVolumes:       newChunkBiomeVolumeCache(4 * 1024),
+		featureBlocks:      newFeatureBlockCache(8 * 1024),
+		oreRuntime:         sharedOreRuntimeData(),
+		orePlans:           newOrePlanCache(16 * 1024),
 		protoChunks:        newProtoChunkCache(320),
 		prelimLevels:       newXZIntCache(),
+		acceleration:       acceleration,
 		finalDensityScalar: scalar,
 		finalDensityVector: vector,
 		airRID:             runtimeIDForBlock(block.Air{}),
@@ -135,11 +170,31 @@ func NewForDimension(seed int64, dim world.Dimension) Generator {
 		lavaRID:            runtimeIDForBlock(block.Lava{Still: true, Depth: 8}),
 		forceBottomBedrock: forceBottomBedrock,
 	}
+	// Concentric placements perform thousands of biome probes but never change
+	// for a generator. Resolve them before chunk workers start so a player's
+	// first request cannot fan out duplicate work or wait on this cold cache.
+	for _, planner := range structurePlanners {
+		if planner.placementType == "concentric_rings" {
+			g.ringPositionsForPlanner(planner)
+		}
+	}
+	return g, nil
 }
 
 // Seed returns the seed configured for the generator.
 func (g Generator) Seed() int64 {
 	return g.seed
+}
+
+// AccelerationStatus reports whether GPU acceleration is currently active.
+func (g Generator) AccelerationStatus() AccelerationStatus {
+	return g.acceleration.status()
+}
+
+// Close releases optional accelerator resources. It is safe to call more than
+// once. CPU-only generators do not require Close.
+func (g Generator) Close() error {
+	return g.acceleration.Close()
 }
 
 func sharedStructureResources() (*gen.WorldgenRegistry, *gen.StructureTemplateRegistry, *structureResolver) {
@@ -177,17 +232,37 @@ func (g Generator) prepareChunkForDecoration(pos world.ChunkPos, c *chunk.Chunk)
 	maxY := c.Range().Max()
 
 	// The pre-decoration state of a chunk is deterministic and needed by every
-	// neighbouring chunk's region replay, so it is cached and copied.
+	// neighbouring chunk's region replay, so it is cached and copied. Reserve
+	// the coordinate before computing so concurrent adjacent requests share a
+	// single expensive terrain build.
 	if g.protoChunks != nil {
-		if cached, biomes, ok := g.protoChunks.get(chunkX, chunkZ); ok {
+		for {
+			entry, flight, owner := g.protoChunks.reserve(chunkX, chunkZ)
+			if owner {
+				completed := false
+				defer func() {
+					if !completed {
+						g.protoChunks.abort(chunkX, chunkZ, flight)
+					}
+				}()
+				biomes := g.prepareChunkUncached(c, chunkX, chunkZ, minY, maxY)
+				g.protoChunks.complete(chunkX, chunkZ, flight, c, biomes)
+				completed = true
+				return biomes, chunkX, chunkZ, minY, maxY
+			}
+			if flight != nil {
+				<-flight.done
+				if !flight.ok {
+					continue
+				}
+				entry = flight.entry
+			}
+			cached := entry.c.Clone()
 			adoptChunkContents(c, cached, minY, maxY)
-			return biomes, chunkX, chunkZ, minY, maxY
+			return entry.biomes, chunkX, chunkZ, minY, maxY
 		}
 	}
 	biomes := g.prepareChunkUncached(c, chunkX, chunkZ, minY, maxY)
-	if g.protoChunks != nil {
-		g.protoChunks.store(chunkX, chunkZ, c, biomes)
-	}
 	return biomes, chunkX, chunkZ, minY, maxY
 }
 
@@ -207,22 +282,34 @@ func (g Generator) prepareChunkUncached(c *chunk.Chunk, chunkX, chunkZ, minY, ma
 	finalDensityRoot := g.rootIndex("final_density")
 	densityScalar := g.finalDensityScalar
 	densityVector := g.finalDensityVector
-	if terrainSampler := newStructureTerrainSampler(g, chunkX, chunkZ, minY, maxY); terrainSampler != nil {
+	terrainSampler := newStructureTerrainSampler(g, chunkX, chunkZ, minY, maxY)
+	if terrainSampler != nil {
 		densityScalar = terrainSampler.scalarEvaluator(g, densityScalar)
 		densityVector = terrainSampler.vectorEvaluator(g, g.finalDensityScalar, densityVector)
 	}
-	densityChunk := gen.NewFinalDensityChunkWithEvaluator(
-		g.graph,
-		finalDensityRoot,
-		chunkX,
-		chunkZ,
-		minY,
-		maxY,
-		g.noises,
-		flat,
-		densityScalar,
-		densityVector,
-	)
+	var densityChunk *gen.FinalDensityChunk
+	if g.acceleration != nil && g.acceleration.active.Load() && g.dimension == world.Overworld {
+		if accelerated, err := g.acceleration.FinalDensity(chunkX, chunkZ, minY, maxY, flat); err == nil {
+			densityChunk = accelerated
+			if terrainSampler != nil {
+				densityChunk.AddCornerDensity(terrainSampler.sample)
+			}
+		}
+	}
+	if densityChunk == nil {
+		densityChunk = gen.NewFinalDensityChunkWithEvaluator(
+			g.graph,
+			finalDensityRoot,
+			chunkX,
+			chunkZ,
+			minY,
+			maxY,
+			g.noises,
+			flat,
+			densityScalar,
+			densityVector,
+		)
+	}
 	var aquifer *gen.NoiseBasedAquifer
 	if g.metadata.AquifersEnabled {
 		aquifer = gen.NewNoiseBasedAquifer(
@@ -341,8 +428,7 @@ func runtimeIDForBlock(b world.Block) uint32 {
 	if b == nil {
 		b = block.Air{}
 	}
-	name, properties := b.EncodeBlock()
-	return world.BlockRuntimeID(runtimeBlock{name: name, properties: properties})
+	return world.BlockRuntimeID(b)
 }
 
 func runtimeIDForDimensionState(state gen.DimensionBlockState) uint32 {

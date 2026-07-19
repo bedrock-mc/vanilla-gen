@@ -1,5 +1,7 @@
 package gen
 
+import "math"
+
 // WorldgenRandom mirrors vanilla WorldgenRandom: java.util.Random-style
 // value derivation over next(bits), where next(bits) comes either from a
 // legacy LCG or from the high bits of a Xoroshiro128++ nextLong. Vanilla
@@ -10,6 +12,58 @@ type WorldgenRandom struct {
 	legacy   LegacyRandom
 	isLegacy bool
 	gaussian marsagliaGaussian
+}
+
+// WorldgenRandomState is a complete, comparable snapshot of a
+// WorldgenRandom. It is useful for memoizing deterministic generation plans
+// while preserving the exact random stream seen by subsequent features.
+type WorldgenRandomState struct {
+	XoroshiroLow             uint64
+	XoroshiroHigh            uint64
+	XoroshiroGaussianNext    uint64
+	LegacySeed               uint64
+	LegacyGaussianNext       uint64
+	GaussianNext             uint64
+	IsLegacy                 bool
+	XoroshiroGaussianHasNext bool
+	LegacyGaussianHasNext    bool
+	GaussianHasNext          bool
+}
+
+func (w *WorldgenRandom) Snapshot() WorldgenRandomState {
+	state := WorldgenRandomState{
+		LegacySeed:            w.legacy.seed,
+		LegacyGaussianNext:    math.Float64bits(w.legacy.gaussian.next),
+		GaussianNext:          math.Float64bits(w.gaussian.next),
+		IsLegacy:              w.isLegacy,
+		LegacyGaussianHasNext: w.legacy.gaussian.hasNext,
+		GaussianHasNext:       w.gaussian.hasNext,
+	}
+	if w.xoro != nil {
+		state.XoroshiroLow = w.xoro.low
+		state.XoroshiroHigh = w.xoro.high
+		state.XoroshiroGaussianNext = math.Float64bits(w.xoro.gaussian.next)
+		state.XoroshiroGaussianHasNext = w.xoro.gaussian.hasNext
+	}
+	return state
+}
+
+func (w *WorldgenRandom) Restore(state WorldgenRandomState) {
+	w.isLegacy = state.IsLegacy
+	w.legacy.seed = state.LegacySeed
+	w.legacy.gaussian.hasNext = state.LegacyGaussianHasNext
+	w.legacy.gaussian.next = math.Float64frombits(state.LegacyGaussianNext)
+	w.gaussian.hasNext = state.GaussianHasNext
+	w.gaussian.next = math.Float64frombits(state.GaussianNext)
+	if w.xoro == nil {
+		x := NewXoroshiro128FromState(state.XoroshiroLow, state.XoroshiroHigh)
+		w.xoro = &x
+	} else {
+		w.xoro.low = state.XoroshiroLow
+		w.xoro.high = state.XoroshiroHigh
+	}
+	w.xoro.gaussian.hasNext = state.XoroshiroGaussianHasNext
+	w.xoro.gaussian.next = math.Float64frombits(state.XoroshiroGaussianNext)
 }
 
 func NewWorldgenRandomXoroshiro(seed int64) *WorldgenRandom {

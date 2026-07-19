@@ -8,8 +8,15 @@ import (
 )
 
 type structureRingCache struct {
-	mu    sync.RWMutex
-	bySet map[string][]world.ChunkPos
+	mu       sync.RWMutex
+	bySet    map[string][]world.ChunkPos
+	inFlight map[string]*structureRingFlight
+}
+
+type structureRingFlight struct {
+	done      chan struct{}
+	positions []world.ChunkPos
+	ok        bool
 }
 
 func newStructureRingCache() *structureRingCache {
@@ -31,44 +38,85 @@ func (c *structureRingCache) Store(setName string, positions []world.ChunkPos) {
 	c.bySet[setName] = positions
 }
 
+func (c *structureRingCache) LoadOrCompute(setName string, compute func() []world.ChunkPos) (positions []world.ChunkPos) {
+	c.mu.Lock()
+	if positions, ok := c.bySet[setName]; ok {
+		c.mu.Unlock()
+		return positions
+	}
+	if flight := c.inFlight[setName]; flight != nil {
+		c.mu.Unlock()
+		<-flight.done
+		if flight.ok {
+			return flight.positions
+		}
+		return c.LoadOrCompute(setName, compute)
+	}
+	if c.inFlight == nil {
+		c.inFlight = make(map[string]*structureRingFlight)
+	}
+	flight := &structureRingFlight{done: make(chan struct{})}
+	c.inFlight[setName] = flight
+	c.mu.Unlock()
+
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		c.mu.Lock()
+		delete(c.inFlight, setName)
+		close(flight.done)
+		c.mu.Unlock()
+	}()
+
+	positions = compute()
+	c.mu.Lock()
+	c.bySet[setName] = positions
+	flight.positions = positions
+	flight.ok = true
+	delete(c.inFlight, setName)
+	close(flight.done)
+	completed = true
+	c.mu.Unlock()
+	return positions
+}
+
 func (g Generator) ringPositionsForPlanner(planner structurePlanner) []world.ChunkPos {
 	if g.structureRings == nil || planner.placementType != "concentric_rings" || planner.concentricPlacement.Count <= 0 {
 		return nil
 	}
-	if positions, ok := g.structureRings.Lookup(planner.setName); ok {
-		return positions
-	}
+	return g.structureRings.LoadOrCompute(planner.setName, func() []world.ChunkPos {
+		placement := planner.concentricPlacement
+		preferredTag := normalizeStructureTag(placement.PreferredBiomes)
+		rng := newLegacyRandom(g.seed + int64(placement.Salt))
+		angle := rng.NextDouble() * math.Pi * 2.0
+		spread := max(placement.Spread, 1)
+		positionInCircle := 0
+		circle := 0
+		positions := make([]world.ChunkPos, 0, placement.Count)
 
-	placement := planner.concentricPlacement
-	preferredTag := normalizeStructureTag(placement.PreferredBiomes)
-	rng := newLegacyRandom(g.seed + int64(placement.Salt))
-	angle := rng.NextDouble() * math.Pi * 2.0
-	spread := max(placement.Spread, 1)
-	positionInCircle := 0
-	circle := 0
-	positions := make([]world.ChunkPos, 0, placement.Count)
+		for i := 0; i < placement.Count; i++ {
+			dist := float64(4*placement.Distance+placement.Distance*circle*6) + (rng.NextDouble()-0.5)*float64(placement.Distance*5)/2.0
+			initialX := int(math.Round(math.Cos(angle) * dist))
+			initialZ := int(math.Round(math.Sin(angle) * dist))
+			positions = append(positions, g.findPreferredRingChunk(initialX, initialZ, preferredTag))
 
-	for i := 0; i < placement.Count; i++ {
-		dist := float64(4*placement.Distance+placement.Distance*circle*6) + (rng.NextDouble()-0.5)*float64(placement.Distance*5)/2.0
-		initialX := int(math.Round(math.Cos(angle) * dist))
-		initialZ := int(math.Round(math.Sin(angle) * dist))
-		positions = append(positions, g.findPreferredRingChunk(initialX, initialZ, preferredTag))
-
-		angle += (math.Pi * 2.0) / float64(spread)
-		positionInCircle++
-		if positionInCircle == spread {
-			circle++
-			positionInCircle = 0
-			spread += (2 * spread) / (circle + 1)
-			remaining := placement.Count - i - 1
-			if spread > remaining {
-				spread = max(remaining, 1)
+			angle += (math.Pi * 2.0) / float64(spread)
+			positionInCircle++
+			if positionInCircle == spread {
+				circle++
+				positionInCircle = 0
+				spread += (2 * spread) / (circle + 1)
+				remaining := placement.Count - i - 1
+				if spread > remaining {
+					spread = max(remaining, 1)
+				}
+				angle += rng.NextDouble() * math.Pi * 2.0
 			}
-			angle += rng.NextDouble() * math.Pi * 2.0
 		}
-	}
-	g.structureRings.Store(planner.setName, positions)
-	return positions
+		return positions
+	})
 }
 
 func (g Generator) findPreferredRingChunk(initialX, initialZ int, preferredTag string) world.ChunkPos {
