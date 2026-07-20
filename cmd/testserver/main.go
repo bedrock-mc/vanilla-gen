@@ -28,6 +28,7 @@ func main() {
 	gpu := flag.Bool("gpu", false, "require OpenCL GPU acceleration for overworld generation")
 	listenAddress := flag.String("listen", ":19132", "address on which the Bedrock server listens")
 	chunkRadius := flag.Int("chunk-radius", 6, "maximum client chunk radius (lower values reduce first-join latency)")
+	chunkWorkers := flag.Int("chunk-workers", 8, "number of concurrent chunk load workers")
 	openCLLibrary := flag.String("opencl-library", os.Getenv("VANILLA_GEN_OPENCL_LIBRARY"), "path to the OpenCL loader (defaults to VANILLA_GEN_OPENCL_LIBRARY)")
 	openCLICD := flag.String("opencl-icd", "", "optional path to an OpenCL vendor implementation (NixOS NVIDIA is auto-detected)")
 	flag.Parse()
@@ -65,7 +66,7 @@ func main() {
 		acceleratedGenerators = append(acceleratedGenerators, &g)
 		return g
 	}
-	conf.ChunkLoadWorkers = 8
+	conf.ChunkLoadWorkers = *chunkWorkers
 	conf.Compression = packet.SnappyCompression
 
 	srv := conf.New()
