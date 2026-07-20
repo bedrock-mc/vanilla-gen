@@ -48,6 +48,14 @@ func (g Generator) applySurfaceAndBiomes(c *chunk.Chunk, biomes sourceBiomeVolum
 			waterHeight := noWaterHeight
 			nextCeilingStoneY := int(^uint(0) >> 1)
 
+			// heights[x][z]+1 overflows the top sub-chunk when the surface
+			// reaches maxY (always true under the nether bedrock roof), so clamp
+			// the scan start. y = maxY is guaranteed air/roof and only resets the
+			// air/water counters, so clamping changes no surface placement.
+			if height > maxY {
+				height = maxY
+			}
+
 			for y := height; y >= minY; y-- {
 				rid := c.Block(uint8(x), int16(y), uint8(z), 0)
 				if rid == g.airRID {
