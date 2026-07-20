@@ -2,6 +2,32 @@
 
 Standalone vanilla-style world generator for Dragonfly.
 
+## Run the example
+
+A ready-to-run test server lives in `cmd/testserver`. It spins up a minimal
+Dragonfly server using this generator so you can connect with a Bedrock client
+(default `:19132`):
+
+```sh
+go run ./cmd/testserver                 # seed 1 (matches the Java parity world)
+go run ./cmd/testserver -seed 42
+go run ./cmd/testserver -gpu            # require OpenCL GPU acceleration
+```
+
+Flags:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-seed` | `1` | World seed. |
+| `-listen` | `:19132` | Address the server listens on. |
+| `-chunk-radius` | `6` | Max client view distance; lower reduces first-join latency. |
+| `-chunk-workers` | `8` | Concurrent chunk load workers. |
+| `-gpu` | `false` | Require OpenCL GPU acceleration for the overworld. |
+
+Delete the `world/` directory between runs when changing the seed or generator.
+
+## Library usage
+
 ```go
 import vanilla "github.com/bedrock-mc/vanilla-gen"
 
@@ -10,9 +36,10 @@ world.Config{
 }
 ```
 
-If you want Dragonfly to register generic implementations for block states that
-exist in the runtime palette but are missing typed upstream block structs, add a
-blank import:
+To register generic implementations for block states that exist in the runtime
+palette but lack typed upstream block structs, add a blank import. It runs
+during init and silently registers the block states upstream still exposes as
+unknown blocks:
 
 ```go
 import (
@@ -21,26 +48,18 @@ import (
 )
 ```
 
-The blank import runs during init and silently registers Dragonfly block states
-that upstream still exposes as unknown blocks.
-
 The module is pinned to the current Dragonfly upstream `master` pseudo-version in `go.mod`.
 
 ## GPU acceleration
 
-Overworld density, climate sampling, and biome classification can optionally
-run on an OpenCL GPU. Existing `New` and `NewForDimension` calls remain
-CPU-only. Enable automatic GPU selection explicitly:
+Overworld density, climate sampling, and biome classification can optionally run
+on an OpenCL GPU. `New` and `NewForDimension` stay CPU-only; enable GPU
+selection explicitly:
 
 ```go
 generator, err := vanilla.NewWithConfig(seed, vanilla.GeneratorConfig{
 	Acceleration: vanilla.AccelerationConfig{
 		Mode: vanilla.AccelerationAuto,
-		OpenCL: vanilla.OpenCLConfig{
-			PlatformIndex:   0,
-			DeviceIndex:     0,
-			ClimateBatchSize: 16_384,
-		},
 	},
 })
 if err != nil {
@@ -51,40 +70,34 @@ defer generator.Close()
 config := world.Config{Generator: generator}
 ```
 
-`AccelerationAuto` falls back to CPU at startup or after a device failure.
-Use `AccelerationOpenCL` to require a usable GPU at startup, or
-`AccelerationCPU` to force the portable path. `AccelerationStatus` reports the
-selected device and any fallback reason.
+- `AccelerationAuto` — use the GPU when available, fall back to CPU at startup or after a device failure.
+- `AccelerationOpenCL` — require a usable GPU at startup.
+- `AccelerationCPU` — force the portable path.
 
-The current backend requires Linux, CGO, an OpenCL loader, and a GPU with
-float64 support. It loads OpenCL dynamically, so OpenCL headers are not a build
-dependency. Most systems can leave `LibraryPath` empty; installations where
-the loader is not on the dynamic-library search path (including some Nix
-setups) can set it explicitly:
+`AccelerationStatus` reports the selected device and any fallback reason.
+
+The backend requires Linux, CGO, an OpenCL loader, and a GPU with float64
+support. It loads OpenCL dynamically, so headers are not a build dependency.
+Most systems can leave `LibraryPath` empty; where the loader is not on the
+dynamic-library search path (including some Nix setups), set it explicitly:
 
 ```go
 OpenCL: vanilla.OpenCLConfig{
-	LibraryPath: "/path/to/libOpenCL.so.1",
+	LibraryPath:    "/path/to/libOpenCL.so.1",
 	ICDLibraryPath: "/path/to/vendor/libOpenCL-implementation.so",
 }
 ```
 
-`ICDLibraryPath` is only needed when the loader has no vendor registration.
-On NixOS, the NVIDIA implementation under `/run/opengl-driver` is detected
+`ICDLibraryPath` is only needed when the loader has no vendor registration. On
+NixOS the NVIDIA implementation under `/run/opengl-driver` is detected
 automatically when `/etc/OpenCL/vendors` and the standard ICD environment
 variables are absent.
 
-GPU acceleration currently applies to the overworld. Reuse one generator:
-construction compiles the kernels and uploads seed-specific noise tables and
-the biome search tree once. The generator and accelerator are safe for
-concurrent chunk generation.
+Reuse one generator: construction compiles the kernels and uploads
+seed-specific noise tables and the biome search tree once. The generator and
+accelerator are safe for concurrent chunk generation.
 
-The included test server caps view distance at 6 chunks by default to keep a
-new client's synchronous generation queue small. Override it with
-`-chunk-radius N`; large radii take proportionally longer to populate a fresh
-world.
-
-### Measured performance
+## Measured performance
 
 Benchmarks on an AMD Ryzen AI 7 350 (16 threads) and NVIDIA GeForce RTX 5060
 Laptop GPU. The table uses the same 64 adjacent chunks before and after the
@@ -108,10 +121,3 @@ Full generation gains are smaller than isolated density/climate kernel gains
 because feature placement, structures, surfaces, carvers, chunk palettes and
 storage remain CPU work. Dragonfly currently requests world chunks
 synchronously, so the sequential rows best represent the included test server.
-
-The accelerator keeps immutable noise data and the flattened 7,593-point
-biome tree resident on the device. Vertical climate queries are grouped by X/Z
-column, avoiding repeated noise evaluation, and production-size climate and
-biome batches perform no per-call allocations. GPU/CPU parity tests cover
-density, climate values, biome decisions, complete chunks, and concurrent
-generation.
