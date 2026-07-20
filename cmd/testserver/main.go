@@ -20,6 +20,7 @@ import (
 	"github.com/df-mc/dragonfly/server"
 	"github.com/df-mc/dragonfly/server/player/chat"
 	"github.com/df-mc/dragonfly/server/world"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 func main() {
@@ -65,6 +66,7 @@ func main() {
 		return g
 	}
 	conf.ChunkLoadWorkers = 8
+	conf.Compression = packet.SnappyCompression
 
 	srv := conf.New()
 	srv.CloseOnProgramEnd()
