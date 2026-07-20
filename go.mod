@@ -8,6 +8,8 @@ require (
 	github.com/sandertv/gophertunnel v1.57.0
 )
 
+replace github.com/df-mc/dragonfly => github.com/hashimthearab/dragonfly v0.0.0-20260720001854-c66742486da0
+
 require (
 	github.com/brentp/intintmap v0.0.0-20251106190759-56907b1f8479 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

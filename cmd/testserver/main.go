@@ -64,6 +64,7 @@ func main() {
 		acceleratedGenerators = append(acceleratedGenerators, &g)
 		return g
 	}
+	conf.ChunkLoadWorkers = 1
 
 	srv := conf.New()
 	srv.CloseOnProgramEnd()
