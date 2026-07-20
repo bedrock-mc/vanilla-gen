@@ -3,12 +3,10 @@ module github.com/bedrock-mc/vanilla-gen
 go 1.26.0
 
 require (
-	github.com/df-mc/dragonfly v0.10.15-0.20260712232412-68863641c33a
+	github.com/df-mc/dragonfly v0.11.1-0.20260720012519-50fd55d170b3
 	github.com/go-gl/mathgl v1.2.0
 	github.com/sandertv/gophertunnel v1.57.0
 )
-
-replace github.com/df-mc/dragonfly => github.com/hashimthearab/dragonfly v0.0.0-20260720001854-c66742486da0
 
 require (
 	github.com/brentp/intintmap v0.0.0-20251106190759-56907b1f8479 // indirect
