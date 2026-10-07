@@ -404,9 +404,9 @@ func (g *Graph) evalCommon(node Node, ctx FunctionContext, noises *NoiseRegistry
 	case OpShiftedNoise:
 		return noises.Sample(
 			node.Noise,
-			float64(ctx.BlockX)*node.XZScale+dep(node.Dep0),
-			float64(ctx.BlockY)*node.YScale+dep(node.Dep1),
-			float64(ctx.BlockZ)*node.XZScale+dep(node.Dep2),
+			float64(float64(ctx.BlockX)*node.XZScale)+dep(node.Dep0),
+			float64(float64(ctx.BlockY)*node.YScale)+dep(node.Dep1),
+			float64(float64(ctx.BlockZ)*node.XZScale)+dep(node.Dep2),
 		)
 	case OpYClampedGradient:
 		return yClampedGradient(ctx.BlockY, node.FromY, node.ToY, node.FromValue, node.ToValue)
@@ -512,9 +512,9 @@ func evalSplineF(spline *Spline, evalArg func(ArgRef) float64) float32 {
 	f3 := (coord - loc0) / (loc1 - loc0)
 	f6 := evalSplineValueF(p0.Value, evalArg)
 	f7 := evalSplineValueF(p1.Value, evalArg)
-	f8 := float32(p0.Derivative)*(loc1-loc0) - (f7 - f6)
-	f9 := -float32(p1.Derivative)*(loc1-loc0) + (f7 - f6)
-	return lerpF(f3, f6, f7) + f3*(1.0-f3)*lerpF(f3, f8, f9)
+	f8 := float32(float32(p0.Derivative)*(loc1-loc0)) - (f7 - f6)
+	f9 := float32(-float32(p1.Derivative)*(loc1-loc0)) + (f7 - f6)
+	return lerpF(f3, f6, f7) + float32(f3*(1.0-f3)*lerpF(f3, f8, f9))
 }
 
 func splineLinearExtend(coord float32, spline *Spline, i int, evalArg func(ArgRef) float64) float32 {
@@ -524,11 +524,12 @@ func splineLinearExtend(coord float32, spline *Spline, i int, evalArg func(ArgRe
 	if derivative == 0.0 {
 		return value
 	}
-	return value + derivative*(coord-float32(p.Location))
+	return value + float32(derivative*(coord-float32(p.Location)))
 }
 
+// lerpF keeps spline arithmetic rounded to float32 before the final addition.
 func lerpF(t, a, b float32) float32 {
-	return a + t*(b-a)
+	return a + float32(t*(b-a))
 }
 
 func evalSplineValueF(value SplineValue, evalArg func(ArgRef) float64) float32 {
@@ -546,7 +547,7 @@ func yClampedGradient(y, fromY, toY int, fromValue, toValue float64) float64 {
 		return toValue
 	}
 	t := float64(y-fromY) / float64(toY-fromY)
-	return fromValue + t*(toValue-fromValue)
+	return lerp(t, fromValue, toValue)
 }
 
 func halfNegative(v float64) float64 {

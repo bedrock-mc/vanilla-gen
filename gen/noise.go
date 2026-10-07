@@ -315,7 +315,7 @@ func (o *OctaveNoise) Sample(x, y, z float64) float64 {
 		octave := &o.octaves[i]
 		lf := octave.lacunarity
 		noiseVal := octave.Sample(wrapCoord(x*lf), wrapCoord(y*lf), wrapCoord(z*lf))
-		value += octave.amplitude * noiseVal * octave.valueFactor
+		value += float64(octave.amplitude * noiseVal * octave.valueFactor)
 	}
 	return value
 }
@@ -465,16 +465,16 @@ func (b *BlendedNoise) Sample(x, y, z float64) float64 {
 // wrapCoord mirrors PerlinNoise.wrap: round-to-nearest multiple of 2^25.
 func wrapCoord(value float64) float64 {
 	const coordRange = 3.3554432e7
-	return value - math.Floor(value/coordRange+0.5)*coordRange
+	return value - float64(math.Floor(value/coordRange+0.5)*coordRange)
 }
 
 func clampedLerp(t, a, b float64) float64 {
 	t = clampFloat(t, 0, 1)
-	return a + t*(b-a)
+	return a + float64(t*(b-a))
 }
 
 func smoothstep(d float64) float64 {
-	return d * d * d * (d*(d*6-15) + 10)
+	return d * d * d * (float64(d*(float64(d*6)-15)) + 10)
 }
 
 // perlinGradients is SimplexNoise.GRADIENT; gradDot computes the exact
@@ -488,9 +488,10 @@ var perlinGradients = [16][3]float64{
 
 func indexedLerp(idx int32, x, y, z float64) float64 {
 	g := &perlinGradients[idx&15]
-	return g[0]*x + g[1]*y + g[2]*z
+	return float64(g[0]*x) + float64(g[1]*y) + float64(g[2]*z)
 }
 
+// lerp rounds the product before addition so supported CPUs return the same noise.
 func lerp(t, a, b float64) float64 {
-	return a + t*(b-a)
+	return a + float64(t*(b-a))
 }

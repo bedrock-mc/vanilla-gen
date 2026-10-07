@@ -2,6 +2,11 @@
 
 Standalone vanilla-style world generator for Dragonfly.
 
+The built-in climate, noise-router and random fixtures target Java 1.21.11.
+Generated blocks and biomes use Dragonfly’s Bedrock runtime registry, but exact
+Bedrock seed, feature and structure parity remains unverified. External region
+and mineshaft parity tests report a missing fixture when one is unavailable.
+
 ## Run the example
 
 A ready-to-run test server lives in `cmd/testserver`. It spins up a minimal
