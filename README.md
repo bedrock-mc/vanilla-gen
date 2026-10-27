@@ -1,5 +1,6 @@
 # vanilla-gen
 
+> [!WARNING]
 > **Archived.** This repository is no longer maintained. Development continues in
 > [cinnabar-mc/worldgen-lab](https://github.com/cinnabar-mc/worldgen-lab), which serves
 > Java Edition terrain from SteelMC to Bedrock clients through Dragonfly.
