@@ -1,5 +1,9 @@
 # vanilla-gen
 
+> **Archived.** This repository is no longer maintained. Development continues in
+> [cinnabar-mc/worldgen-lab](https://github.com/cinnabar-mc/worldgen-lab), which serves
+> Java Edition terrain from SteelMC to Bedrock clients through Dragonfly.
+
 Standalone vanilla-style world generator for Dragonfly.
 
 The built-in climate, noise-router and random fixtures target Java 1.21.11.
